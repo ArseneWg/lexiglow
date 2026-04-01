@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "WordWise Hover Translator",
+  "version": "0.1.0",
+  "description": "Hover English words on web pages to see Chinese translations for unfamiliar vocabulary.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://translate.googleapis.com/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "WordWise",
+    "default_popup": "dist/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "dist/options.html"
+}

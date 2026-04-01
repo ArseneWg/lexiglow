@@ -1,0 +1,21 @@
+{
+  "name": "wordwise-hover-translator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-extension.mjs",
+    "dev": "node scripts/build-extension.mjs",
+    "fetch:lexicon": "node scripts/fetch-lexicon.mjs",
+    "prepare:lexicon": "node scripts/build-lexicon.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.24",
+    "@types/node": "^24.6.0",
+    "esbuild": "^0.27.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.7",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,113 @@
+:root {
+  color-scheme: light;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: #172033;
+}
+
+body {
+  margin: 0;
+  width: 360px;
+  min-height: 420px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 102, 0.35), transparent 34%),
+    linear-gradient(180deg, #fffdf7 0%, #f4eee2 100%);
+}
+
+#app {
+  padding: 18px;
+}
+
+.panel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.hero p,
+.muted {
+  margin: 0;
+  color: #667085;
+  line-height: 1.55;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(255, 248, 232, 0.82);
+}
+
+.stat strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 22px;
+}
+
+.controls {
+  display: grid;
+  gap: 10px;
+}
+
+.controls-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.controls-header strong {
+  font-size: 26px;
+}
+
+input[type="range"],
+input[type="number"] {
+  width: 100%;
+}
+
+input[type="range"] {
+  accent-color: #0f766e;
+}
+
+input[type="number"] {
+  box-sizing: border-box;
+  border: 1px solid rgba(31, 41, 55, 0.12);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.primary {
+  background: #14213d;
+  color: white;
+}
+
+.secondary {
+  background: rgba(20, 33, 61, 0.08);
+  color: #14213d;
+}
