@@ -1,6 +1,7 @@
 import "./styles.css";
 
 import { LEXICON_WORDS, lookupRank, resolveLookupLemma } from "../shared/lexicon";
+import type { RuntimeMessage, TranslatorSettingsResponse } from "../shared/messages";
 import {
   clearLearningProgress,
   countExtraMastered,
@@ -14,11 +15,16 @@ import {
   updateKnownBaseRank,
 } from "../shared/settings";
 import { getSettings, saveSettings } from "../shared/storage";
-import type { UserSettings } from "../shared/types";
+import { DEFAULT_TRANSLATOR_SETTINGS } from "../shared/translator";
+import type { TranslatorSettings, UserSettings } from "../shared/types";
 
 interface SearchEntry {
   lemma: string;
   rank: number | null;
+}
+
+function runtimeSend<T>(message: RuntimeMessage): Promise<T> {
+  return chrome.runtime.sendMessage(message) as Promise<T>;
 }
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -63,6 +69,19 @@ app.innerHTML = `
       <p class="muted">可以把词设为已掌握、未掌握，或加入永不翻译列表。</p>
       <div class="search-results" id="searchResults"></div>
     </section>
+    <section class="panel">
+      <h2>LLM 翻译设置</h2>
+      <p class="muted">优先使用基于句子上下文的 LLM 翻译；当额度不足、限流或未配置时，自动回退到 Google。API Key 只保存在当前浏览器本地，不会进入 GitHub 仓库。</p>
+      <div class="rank-controls">
+        <input id="providerBaseUrl" type="text" placeholder="Base URL" />
+        <input id="providerModel" type="text" placeholder="Model" />
+        <input id="providerApiKey" type="password" placeholder="API Key（仅本地保存）" />
+        <label class="muted"><input id="fallbackToGoogle" type="checkbox" checked /> 调用失败时自动回退 Google</label>
+        <div class="word-actions">
+          <button class="primary" id="saveTranslatorButton">保存翻译设置</button>
+        </div>
+      </div>
+    </section>
     <section class="grid">
       <section class="panel">
         <h2>手工已掌握</h2>
@@ -90,11 +109,17 @@ const extraKnownCount = document.querySelector<HTMLElement>("#extraKnownCount")!
 const ignoredCount = document.querySelector<HTMLElement>("#ignoredCount")!;
 const searchInput = document.querySelector<HTMLInputElement>("#searchInput")!;
 const searchResults = document.querySelector<HTMLElement>("#searchResults")!;
+const providerBaseUrl = document.querySelector<HTMLInputElement>("#providerBaseUrl")!;
+const providerModel = document.querySelector<HTMLInputElement>("#providerModel")!;
+const providerApiKey = document.querySelector<HTMLInputElement>("#providerApiKey")!;
+const fallbackToGoogle = document.querySelector<HTMLInputElement>("#fallbackToGoogle")!;
+const saveTranslatorButton = document.querySelector<HTMLButtonElement>("#saveTranslatorButton")!;
 const masteredList = document.querySelector<HTMLElement>("#masteredList")!;
 const ignoredList = document.querySelector<HTMLElement>("#ignoredList")!;
 const clearButton = document.querySelector<HTMLButtonElement>("#clearButton")!;
 
 let settings: UserSettings;
+let translatorSettings: TranslatorSettings = DEFAULT_TRANSLATOR_SETTINGS;
 
 function setRankInputs(value: number) {
   const stringValue = String(value);
@@ -261,6 +286,10 @@ function renderAll() {
   totalKnownCount.textContent = String(countTotalKnown(settings));
   extraKnownCount.textContent = String(countExtraMastered(settings));
   ignoredCount.textContent = String(settings.ignoredWords.length);
+  providerBaseUrl.value = translatorSettings.providerBaseUrl;
+  providerModel.value = translatorSettings.providerModel;
+  providerApiKey.value = translatorSettings.apiKey;
+  fallbackToGoogle.checked = translatorSettings.fallbackToGoogle;
   renderSearch();
   renderMasteredList();
   renderIgnoredList();
@@ -270,6 +299,20 @@ async function persistSettings(nextSettings: UserSettings) {
   settings = nextSettings;
   await saveSettings(settings);
   renderAll();
+}
+
+async function persistTranslatorSettings(nextSettings: TranslatorSettings) {
+  const response = await runtimeSend<TranslatorSettingsResponse>({
+    type: "SAVE_TRANSLATOR_SETTINGS",
+    payload: {
+      settings: nextSettings,
+    },
+  });
+
+  if (response.ok && response.settings) {
+    translatorSettings = response.settings;
+    renderAll();
+  }
 }
 
 rankRange.addEventListener("input", async () => {
@@ -341,8 +384,21 @@ clearButton.addEventListener("click", async () => {
   await persistSettings(clearLearningProgress(settings));
 });
 
+saveTranslatorButton.addEventListener("click", async () => {
+  await persistTranslatorSettings({
+    providerBaseUrl: providerBaseUrl.value,
+    providerModel: providerModel.value,
+    apiKey: providerApiKey.value,
+    fallbackToGoogle: fallbackToGoogle.checked,
+  });
+});
+
 async function boot() {
   settings = await getSettings();
+  const translatorResponse = await runtimeSend<TranslatorSettingsResponse>({
+    type: "GET_TRANSLATOR_SETTINGS",
+  });
+  translatorSettings = translatorResponse.settings ?? DEFAULT_TRANSLATOR_SETTINGS;
   renderAll();
 }
 

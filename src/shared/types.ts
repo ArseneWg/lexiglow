@@ -5,6 +5,13 @@ export interface UserSettings {
   ignoredWords: string[];
 }
 
+export interface TranslatorSettings {
+  providerBaseUrl: string;
+  providerModel: string;
+  apiKey: string;
+  fallbackToGoogle: boolean;
+}
+
 export interface TranslationResult {
   translation: string;
   provider: string;

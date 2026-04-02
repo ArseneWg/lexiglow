@@ -3,4 +3,5 @@ export const MAX_KNOWN_BASE_RANK = 10000;
 export const HOVER_DELAY_MS = 320;
 export const HIDE_DELAY_MS = 140;
 export const STORAGE_SETTINGS_KEY = "userSettings";
+export const STORAGE_TRANSLATOR_SETTINGS_KEY = "translatorSettings";
 export const CACHE_KEY_PREFIX = "translation:";

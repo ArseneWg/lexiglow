@@ -48,6 +48,10 @@ export function extractWordAtOffset(text: string, offset: number): WordAtOffset 
     return null;
   }
 
+  if (text[start - 1] === "@") {
+    return null;
+  }
+
   const surface = text.slice(start, end);
 
   if (!isEnglishLikeWord(surface)) {

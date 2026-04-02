@@ -14,4 +14,8 @@ describe("extractWordAtOffset", () => {
   test("skips non-english tokens", () => {
     expect(extractWordAtOffset("abc123", 2)).toBeNull();
   });
+
+  test("skips @mention handles", () => {
+    expect(extractWordAtOffset("@somebody replied", 4)).toBeNull();
+  });
 });

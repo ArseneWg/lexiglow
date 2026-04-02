@@ -86,7 +86,9 @@ body {
 
 input[type="range"],
 input[type="number"],
-input[type="search"] {
+input[type="search"],
+input[type="text"],
+input[type="password"] {
   width: 100%;
 }
 
@@ -95,7 +97,9 @@ input[type="range"] {
 }
 
 input[type="number"],
-input[type="search"] {
+input[type="search"],
+input[type="text"],
+input[type="password"] {
   box-sizing: border-box;
   border: 1px solid rgba(31, 41, 55, 0.12);
   border-radius: 14px;

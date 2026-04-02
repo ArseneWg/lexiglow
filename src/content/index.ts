@@ -1,5 +1,10 @@
 import { lookupRank, resolveLookupLemma } from "../shared/lexicon";
-import type { LookupWordResponse, RuntimeMessage, SettingsResponse } from "../shared/messages";
+import type {
+  LookupWordResponse,
+  RuntimeMessage,
+  SettingsResponse,
+  TranslationProviderChoice,
+} from "../shared/messages";
 import { DEFAULT_SETTINGS, resolveWordFlags } from "../shared/settings";
 import { getSettings } from "../shared/storage";
 import type { LexiconLookupResult, UserSettings } from "../shared/types";
@@ -38,6 +43,25 @@ const TOOLTIP_STYLE = `
     line-height: 1.5;
     color: #1f2937;
     margin-bottom: 8px;
+    display: none;
+  }
+  .wordwise-translation[data-visible="true"] {
+    display: block;
+  }
+  .wordwise-hint {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #6b7280;
+    margin-bottom: 8px;
+  }
+  .wordwise-hint[data-visible="false"] {
+    display: none;
+  }
+  .wordwise-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
   }
   .wordwise-meta {
     display: flex;
@@ -61,6 +85,13 @@ const TOOLTIP_STYLE = `
   .wordwise-button:hover {
     background: #20335d;
   }
+  .wordwise-button--secondary {
+    background: rgba(20, 33, 61, 0.08);
+    color: #14213d;
+  }
+  .wordwise-button--secondary:hover {
+    background: rgba(20, 33, 61, 0.14);
+  }
 `;
 
 const HIGHLIGHT_STYLE = `
@@ -75,6 +106,7 @@ interface HoverContext {
   rect: DOMRect;
   requestId: number;
   forceTranslate?: boolean;
+  contextText?: string;
 }
 
 interface WordAtOffset {
@@ -97,6 +129,29 @@ function isEnglishLikeWord(surface: string): boolean {
 
 function isSingleEnglishWord(surface: string): boolean {
   return /^[A-Za-z]+(?:'[A-Za-z]+)?$/.test(surface.trim());
+}
+
+function extractSentenceAroundRange(text: string, start: number, end: number): string {
+  const leftBoundary = Math.max(
+    text.lastIndexOf(".", start - 1),
+    text.lastIndexOf("!", start - 1),
+    text.lastIndexOf("?", start - 1),
+    text.lastIndexOf("\n", start - 1),
+  );
+  const rightCandidates = [
+    text.indexOf(".", end),
+    text.indexOf("!", end),
+    text.indexOf("?", end),
+    text.indexOf("\n", end),
+  ].filter((value) => value >= 0);
+  const rightBoundary = rightCandidates.length ? Math.min(...rightCandidates) : text.length;
+  const sentence = text.slice(leftBoundary >= 0 ? leftBoundary + 1 : 0, rightBoundary).trim();
+
+  if (!sentence) {
+    return text.slice(Math.max(0, start - 100), Math.min(text.length, end + 100)).trim();
+  }
+
+  return sentence;
 }
 
 function extractWordAtOffset(text: string, offset: number): WordAtOffset | null {
@@ -131,6 +186,10 @@ function extractWordAtOffset(text: string, offset: number): WordAtOffset | null 
     return null;
   }
 
+  if (text[start - 1] === "@") {
+    return null;
+  }
+
   const surface = text.slice(start, end);
 
   if (!isEnglishLikeWord(surface)) {
@@ -159,6 +218,27 @@ function createTooltipRoot() {
 
   const translationEl = document.createElement("div");
   translationEl.className = "wordwise-translation";
+  translationEl.dataset.visible = "false";
+
+  const hintEl = document.createElement("div");
+  hintEl.className = "wordwise-hint";
+  hintEl.dataset.visible = "true";
+  hintEl.textContent = "默认使用 Google 翻译，不满意可切换到 LLM。";
+
+  const actionsEl = document.createElement("div");
+  actionsEl.className = "wordwise-actions";
+
+  const googleButton = document.createElement("button");
+  googleButton.className = "wordwise-button wordwise-button--secondary";
+  googleButton.textContent = "Google 翻译";
+
+  const llmButton = document.createElement("button");
+  llmButton.className = "wordwise-button wordwise-button--secondary";
+  llmButton.textContent = "LLM 翻译";
+
+  const ignoreButton = document.createElement("button");
+  ignoreButton.className = "wordwise-button wordwise-button--secondary";
+  ignoreButton.textContent = "永不翻译";
 
   const metaEl = document.createElement("div");
   metaEl.className = "wordwise-meta";
@@ -170,12 +250,24 @@ function createTooltipRoot() {
   button.className = "wordwise-button";
   button.textContent = "已掌握";
 
-  metaEl.append(rankEl, button);
-  card.append(surfaceEl, translationEl, metaEl);
+  actionsEl.append(googleButton, llmButton, ignoreButton, button);
+  metaEl.append(rankEl);
+  card.append(surfaceEl, hintEl, translationEl, actionsEl, metaEl);
   shadow.append(style, card);
   document.documentElement.append(host);
 
-  return { host, card, surfaceEl, translationEl, rankEl, button };
+  return {
+    host,
+    card,
+    surfaceEl,
+    hintEl,
+    translationEl,
+    rankEl,
+    button,
+    googleButton,
+    llmButton,
+    ignoreButton,
+  };
 }
 
 function installHighlightStyle() {
@@ -229,6 +321,14 @@ function getSelectedWordContext(): HoverContext | null {
     return null;
   }
 
+  let contextText = surface;
+  const startContainer = range.startContainer;
+
+  if (startContainer.nodeType === Node.TEXT_NODE && startContainer === range.endContainer) {
+    const textNode = startContainer as Text;
+    contextText = extractSentenceAroundRange(textNode.textContent ?? "", range.startOffset, range.endOffset);
+  }
+
   activeRequestId += 1;
 
   return {
@@ -236,6 +336,7 @@ function getSelectedWordContext(): HoverContext | null {
     rect,
     requestId: activeRequestId,
     forceTranslate: true,
+    contextText,
   };
 }
 
@@ -308,15 +409,19 @@ let highlightTimer: number | null = null;
 let activeRequestId = 0;
 let activeResult: LexiconLookupResult | null = null;
 let activeAnchorRect: DOMRect | null = null;
+let activeContext: HoverContext | null = null;
 let currentSettings: UserSettings | null = null;
 let tooltipHovered = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
+let activeTranslationRequestId = 0;
 
 function hideTooltip() {
   tooltip.host.style.display = "none";
   activeResult = null;
   activeAnchorRect = null;
+  activeContext = null;
+  activeTranslationRequestId += 1;
 }
 
 function clearHighlights() {
@@ -333,9 +438,17 @@ function scheduleHide() {
   }
 
   hideTimer = window.setTimeout(() => {
-    if (!tooltipHovered) {
-      hideTooltip();
+    if (
+      tooltipHovered ||
+      isPointerNearTooltip(lastMouseX, lastMouseY) ||
+      isPointerNearAnchor(lastMouseX, lastMouseY) ||
+      isPointerInTooltipCorridor(lastMouseX, lastMouseY)
+    ) {
+      scheduleHide();
+      return;
     }
+
+    hideTooltip();
   }, HIDE_DELAY_MS);
 }
 
@@ -397,14 +510,29 @@ function isPointerNearAnchor(clientX: number, clientY: number): boolean {
   );
 }
 
-function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
-  if (!result.translation) {
-    hideTooltip();
-    return;
+function isPointerInTooltipCorridor(clientX: number, clientY: number): boolean {
+  if (tooltip.host.style.display !== "block" || !activeAnchorRect) {
+    return false;
   }
 
+  const tooltipRect = tooltip.card.getBoundingClientRect();
+  const padding = 18;
+  const left = Math.min(activeAnchorRect.left, tooltipRect.left) - padding;
+  const right = Math.max(activeAnchorRect.right, tooltipRect.right) + padding;
+  const top = Math.min(activeAnchorRect.top, tooltipRect.top) - padding;
+  const bottom = Math.max(activeAnchorRect.bottom, tooltipRect.bottom) + padding;
+
+  return clientX >= left && clientX <= right && clientY >= top && clientY <= bottom;
+}
+
+function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.surfaceEl.textContent = result.surface;
-  tooltip.translationEl.textContent = result.translation;
+  tooltip.translationEl.textContent = result.translation ?? "";
+  tooltip.translationEl.dataset.visible = result.translation ? "true" : "false";
+  tooltip.hintEl.dataset.visible = result.translation ? "false" : "true";
+  if (!result.translation) {
+    tooltip.hintEl.textContent = "默认使用 Google 翻译，不满意可切换到 LLM。";
+  }
   tooltip.rankEl.textContent = rankLabel(result);
   tooltip.host.style.display = "block";
   activeAnchorRect = rect;
@@ -460,6 +588,12 @@ async function refreshHighlights() {
     let match = matcher.exec(text);
     while (match && pendingCount < HIGHLIGHT_SCAN_LIMIT) {
       const surface = match[0];
+
+      if (text[match.index - 1] === "@") {
+        match = matcher.exec(text);
+        continue;
+      }
+
       const lemma = resolveLookupLemma(surface);
       const rank = lemma ? lookupRank(lemma) : null;
       const flags = resolveWordFlags(lemma, rank, settings, surface);
@@ -508,6 +642,7 @@ async function resolveHoverWord(context: HoverContext) {
       payload: {
         surface: context.surface,
         forceTranslate: context.forceTranslate,
+        contextText: context.contextText,
       },
     });
   } catch (error) {
@@ -533,7 +668,76 @@ async function resolveHoverWord(context: HoverContext) {
     return;
   }
 
+  activeContext = context;
   renderTooltip(response.result, context.rect);
+  await requestTranslationForContext("google", context);
+}
+
+async function requestTranslation(provider: TranslationProviderChoice) {
+  if (!activeContext) {
+    return;
+  }
+
+  const requestContext = activeContext;
+  activeTranslationRequestId += 1;
+  const translationRequestId = activeTranslationRequestId;
+
+  tooltip.translationEl.dataset.visible = "false";
+  tooltip.hintEl.dataset.visible = "true";
+  tooltip.hintEl.textContent = provider === "llm" ? "LLM 翻译中..." : "Google 翻译中...";
+
+  let response: LookupWordResponse;
+
+  try {
+    response = await runtimeSend<LookupWordResponse>({
+      type: "TRANSLATE_WORD",
+      payload: {
+        surface: requestContext.surface,
+        contextText: requestContext.contextText,
+        forceTranslate: requestContext.forceTranslate,
+        provider,
+      },
+    });
+  } catch (error) {
+    if (isExtensionContextInvalidated(error)) {
+      hideTooltip();
+      return;
+    }
+
+    throw error;
+  }
+
+  if (!response.ok || !response.result) {
+    if (translationRequestId === activeTranslationRequestId) {
+      tooltip.hintEl.textContent = "翻译暂不可用。";
+    }
+    return;
+  }
+
+  if (
+    translationRequestId !== activeTranslationRequestId ||
+    !activeContext ||
+    activeContext.requestId !== requestContext.requestId
+  ) {
+    return;
+  }
+
+  activeResult = response.result;
+  renderTooltip(response.result, requestContext.rect);
+  if (response.result.translationProvider) {
+    const providerLabel =
+      response.result.translationProvider === "google-web" ? "Google" : "LLM";
+    tooltip.hintEl.textContent =
+      providerLabel === "Google" ? "默认 Google 结果，不满意可试试 LLM。" : "已使用 LLM 翻译。";
+  }
+}
+
+async function requestTranslationForContext(
+  provider: TranslationProviderChoice,
+  context: HoverContext,
+) {
+  activeContext = context;
+  await requestTranslation(provider);
 }
 
 async function markWordForReview(surface: string): Promise<boolean> {
@@ -607,6 +811,7 @@ function getHoverContext(clientX: number, clientY: number): HoverContext | null 
     surface: word.surface,
     rect,
     requestId: activeRequestId,
+    contextText: extractSentenceAroundRange(text, word.start, word.end),
   };
 }
 
@@ -653,6 +858,45 @@ tooltip.button.addEventListener("click", async () => {
   }
 });
 
+tooltip.googleButton.addEventListener("click", async () => {
+  await requestTranslation("google");
+});
+
+tooltip.llmButton.addEventListener("click", async () => {
+  await requestTranslation("llm");
+});
+
+tooltip.ignoreButton.addEventListener("click", async () => {
+  if (!activeResult?.lemma) {
+    return;
+  }
+
+  let response: SettingsResponse;
+
+  try {
+    response = await runtimeSend<SettingsResponse>({
+      type: "SET_WORD_IGNORED",
+      payload: {
+        lemma: activeResult.lemma,
+      },
+    });
+  } catch (error) {
+    if (isExtensionContextInvalidated(error)) {
+      hideTooltip();
+      return;
+    }
+
+    throw error;
+  }
+
+  if (response.ok) {
+    currentSettings = response.settings ?? currentSettings;
+    activeRequestId += 1;
+    hideTooltip();
+    await refreshHighlightsNow();
+  }
+});
+
 document.addEventListener(
   "mousemove",
   (event) => {
@@ -664,12 +908,25 @@ document.addEventListener(
     lastMouseX = event.clientX;
     lastMouseY = event.clientY;
 
+    if (
+      tooltip.host.style.display === "block" &&
+      (isPointerNearTooltip(event.clientX, event.clientY) ||
+        isPointerNearAnchor(event.clientX, event.clientY) ||
+        isPointerInTooltipCorridor(event.clientX, event.clientY))
+    ) {
+      if (hideTimer) {
+        window.clearTimeout(hideTimer);
+      }
+      return;
+    }
+
     const context = getHoverContext(event.clientX, event.clientY);
 
     if (!context) {
       if (
         isPointerNearTooltip(event.clientX, event.clientY) ||
-        isPointerNearAnchor(event.clientX, event.clientY)
+        isPointerNearAnchor(event.clientX, event.clientY) ||
+        isPointerInTooltipCorridor(event.clientX, event.clientY)
       ) {
         return;
       }
@@ -704,6 +961,7 @@ document.addEventListener("dblclick", () => {
       }
 
       await resolveHoverWord(context);
+      await requestTranslationForContext("llm", context);
     })();
   }, 0);
 });
