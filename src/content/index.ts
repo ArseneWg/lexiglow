@@ -3,11 +3,13 @@ import type {
   LookupWordResponse,
   RuntimeMessage,
   SentenceAnalysisResponse,
+  SelectionTranslationResponse,
   SettingsResponse,
   TranslationProviderChoice,
 } from "../shared/messages";
 import { DEFAULT_SETTINGS, resolveWordFlags } from "../shared/settings";
 import { getSettings } from "../shared/storage";
+import { isEnglishSelectionText, isSingleEnglishWord, normalizeSelectionText } from "../shared/word";
 import type {
   LexiconLookupResult,
   SentenceAnalysisResult,
@@ -290,6 +292,14 @@ interface SentenceSelectionContext {
   text: string;
   rect: DOMRect;
   requestId: number;
+  contextText?: string;
+}
+
+interface SelectedTextContext {
+  text: string;
+  rect: DOMRect;
+  requestId: number;
+  contextText: string;
 }
 
 interface WordAtOffset {
@@ -308,10 +318,6 @@ function isAlphaNumeric(char: string | undefined): boolean {
 
 function isEnglishLikeWord(surface: string): boolean {
   return /^[A-Za-z]+(?:'[A-Za-z]+)?$/.test(surface);
-}
-
-function isSingleEnglishWord(surface: string): boolean {
-  return /^[A-Za-z]+(?:'[A-Za-z]+)?$/.test(surface.trim());
 }
 
 function extractSentenceAroundRange(text: string, start: number, end: number): string {
@@ -404,7 +410,7 @@ function normalizeHighlightWord(value: string): string {
 }
 
 function isAnalyzableSelectionText(text: string): boolean {
-  const compact = text.replace(/\s+/g, " ").trim();
+  const compact = normalizeSelectionText(text);
 
   if (!compact || compact.length < 32 || compact.length > 360) {
     return false;
@@ -593,6 +599,10 @@ function createTooltipRoot() {
   llmButton.className = "wordwise-button wordwise-button--secondary";
   llmButton.textContent = "LLM 翻译";
 
+  const selectionAnalysisButton = document.createElement("button");
+  selectionAnalysisButton.className = "wordwise-button wordwise-button--secondary";
+  selectionAnalysisButton.textContent = "长难句翻译";
+
   const ignoreButton = document.createElement("button");
   ignoreButton.className = "wordwise-button wordwise-button--secondary";
   ignoreButton.textContent = "永不翻译";
@@ -689,7 +699,7 @@ function createTooltipRoot() {
   analysisStepsSection.append(analysisStepsLabel, analysisStepsEl);
 
   translationEl.append(primaryTranslationEl, secondaryTranslationEl);
-  actionsEl.append(llmButton, ignoreButton, button);
+  actionsEl.append(llmButton, selectionAnalysisButton, ignoreButton, button);
   metaEl.append(rankEl);
   wordView.append(surfaceEl, hintEl, translationEl, actionsEl, metaEl);
   analysisHeader.append(analysisTitleEl, analysisTriggerButton);
@@ -717,8 +727,10 @@ function createTooltipRoot() {
     primaryTranslationEl,
     secondaryTranslationEl,
     rankEl,
+    metaEl,
     button,
     llmButton,
+    selectionAnalysisButton,
     ignoreButton,
     analysisTitleEl,
     analysisTriggerButton,
@@ -802,7 +814,18 @@ function getSelectedWordContext(): HoverContext | null {
   };
 }
 
-function getSelectedSentenceContext(): SentenceSelectionContext | null {
+function getSelectionContextText(range: Range, fallback: string): string {
+  const startContainer = range.startContainer;
+
+  if (startContainer.nodeType === Node.TEXT_NODE && startContainer === range.endContainer) {
+    const textNode = startContainer as Text;
+    return extractSentenceAroundRange(textNode.textContent ?? "", range.startOffset, range.endOffset);
+  }
+
+  return fallback;
+}
+
+function getSelectedTextContext(): SelectedTextContext | null {
   const selection = window.getSelection();
 
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
@@ -810,10 +833,10 @@ function getSelectedSentenceContext(): SentenceSelectionContext | null {
   }
 
   const range = selection.getRangeAt(0).cloneRange();
-  const text = selection.toString().replace(/\s+/g, " ").trim();
+  const text = normalizeSelectionText(selection.toString());
 
   if (
-    !isAnalyzableSelectionText(text) ||
+    !isEnglishSelectionText(text) ||
     isIgnoredContainer(range.startContainer) ||
     isIgnoredContainer(range.endContainer)
   ) {
@@ -832,7 +855,18 @@ function getSelectedSentenceContext(): SentenceSelectionContext | null {
     text,
     rect,
     requestId: selectionRequestId,
+    contextText: getSelectionContextText(range, text),
   };
+}
+
+function getSelectedSentenceContext(): SentenceSelectionContext | null {
+  const context = getSelectedTextContext();
+
+  if (!context || !isAnalyzableSelectionText(context.text)) {
+    return null;
+  }
+
+  return context;
 }
 
 function isIgnoredContainer(node: Node): boolean {
@@ -914,6 +948,8 @@ let tooltipHovered = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
 let activeTranslationRequestId = 0;
+let activeSelectionTooltipContext: SelectedTextContext | null = null;
+let activeSelectionTranslationRequestId = 0;
 let activeSelectionContext: SentenceSelectionContext | null = null;
 let selectionRequestId = 0;
 let analysisPanelOpen = false;
@@ -928,10 +964,19 @@ function hideTooltip() {
   activeResult = null;
   activeAnchorRect = null;
   activeContext = null;
+  activeSelectionTooltipContext = null;
   activeTranslationRequestId += 1;
+  activeSelectionTranslationRequestId += 1;
   if (!analysisPanelOpen) {
     activeSelectionContext = null;
   }
+}
+
+function cancelActiveAsyncRequests() {
+  activeRequestId += 1;
+  activeTranslationRequestId += 1;
+  activeSelectionTranslationRequestId += 1;
+  activeSentenceAnalysisRequestId += 1;
 }
 
 function clearHighlights() {
@@ -1017,6 +1062,48 @@ function positionSentenceAnalysisPanel(rect: DOMRect) {
   positionTooltip(rect);
 }
 
+function setWordTooltipControls(mode: "word" | "selection") {
+  const isSelection = mode === "selection";
+  tooltip.button.style.display = isSelection ? "none" : "inline-flex";
+  tooltip.ignoreButton.style.display = isSelection ? "none" : "inline-flex";
+  tooltip.metaEl.style.display = isSelection ? "none" : "flex";
+  tooltip.llmButton.style.display = "inline-flex";
+  tooltip.selectionAnalysisButton.style.display = isSelection ? "inline-flex" : "none";
+}
+
+function renderSelectionTooltip(
+  context: SelectedTextContext,
+  result?: {
+    translation?: string;
+    sentenceTranslation?: string;
+    translationProvider?: string;
+  },
+) {
+  tooltip.card.dataset.mode = "word";
+  tooltip.wordView.dataset.visible = "true";
+  tooltip.analysisView.dataset.visible = "false";
+  setWordTooltipControls("selection");
+  tooltip.surfaceEl.textContent = context.text;
+  tooltip.primaryTranslationEl.textContent = result?.translation ?? "";
+  tooltip.secondaryTranslationEl.textContent = result?.sentenceTranslation ?? "";
+  tooltip.secondaryTranslationEl.dataset.visible = result?.sentenceTranslation ? "true" : "false";
+  tooltip.translationEl.dataset.visible = result?.translation ? "true" : "false";
+  tooltip.hintEl.dataset.visible = "true";
+  tooltip.hintEl.dataset.loading = "false";
+  tooltip.hintEl.textContent = result?.translationProvider === "deepseek-chat"
+    ? "已使用 LLM 翻译。"
+    : "默认 Google 结果，不满意可试试 LLM，或点长难句翻译。";
+  tooltip.rankEl.textContent = "";
+  tooltip.host.style.display = "block";
+  activeAnchorRect = context.rect;
+  activeSelectionTooltipContext = context;
+  activeSelectionContext = context;
+  activeContext = null;
+  activeResult = null;
+  analysisPanelOpen = false;
+  positionTooltip(context.rect);
+}
+
 function showSentenceAnalysisButton(context: SentenceSelectionContext) {
   activeSelectionContext = context;
   activeAnchorRect = context.rect;
@@ -1089,6 +1176,7 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.card.dataset.mode = "word";
   tooltip.wordView.dataset.visible = "true";
   tooltip.analysisView.dataset.visible = "false";
+  setWordTooltipControls("word");
   tooltip.surfaceEl.textContent = result.surface;
   tooltip.primaryTranslationEl.textContent = result.translation ?? "";
   tooltip.secondaryTranslationEl.textContent = result.sentenceTranslation ?? "";
@@ -1103,6 +1191,7 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.rankEl.textContent = rankLabel(result);
   tooltip.host.style.display = "block";
   activeAnchorRect = rect;
+  activeSelectionTooltipContext = null;
   positionTooltip(rect);
   activeResult = result;
 }
@@ -1329,6 +1418,65 @@ async function requestTranslation(provider: TranslationProviderChoice) {
   }
 }
 
+async function requestSelectionTranslation(
+  provider: TranslationProviderChoice,
+  context = activeSelectionTooltipContext,
+) {
+  if (!context) {
+    return;
+  }
+
+  activeSelectionTooltipContext = context;
+  activeSelectionTranslationRequestId += 1;
+  const translationRequestId = activeSelectionTranslationRequestId;
+
+  renderSelectionTooltip(context);
+  tooltip.hintEl.dataset.loading = "true";
+  tooltip.hintEl.textContent = provider === "llm" ? "LLM 翻译中..." : "Google 翻译中...";
+
+  let response: SelectionTranslationResponse;
+
+  try {
+    response = await runtimeSend<SelectionTranslationResponse>({
+      type: "TRANSLATE_SELECTION",
+      payload: {
+        text: context.text,
+        contextText: context.contextText,
+        provider,
+      },
+    });
+  } catch (error) {
+    if (isExtensionContextInvalidated(error)) {
+      hideTooltip();
+      return;
+    }
+
+    throw error;
+  }
+
+  if (!response.ok || !response.result) {
+    if (translationRequestId === activeSelectionTranslationRequestId) {
+      tooltip.hintEl.dataset.loading = "false";
+      tooltip.hintEl.textContent = "翻译暂不可用。";
+    }
+    return;
+  }
+
+  if (
+    translationRequestId !== activeSelectionTranslationRequestId ||
+    !activeSelectionTooltipContext ||
+    activeSelectionTooltipContext.requestId !== context.requestId
+  ) {
+    return;
+  }
+
+  renderSelectionTooltip(context, {
+    translation: response.result.translation,
+    sentenceTranslation: response.result.sentenceTranslation,
+    translationProvider: response.result.translationProvider,
+  });
+}
+
 async function requestTranslationForContext(
   provider: TranslationProviderChoice,
   context: HoverContext,
@@ -1471,19 +1619,22 @@ function updateSelectionAnalysisTrigger() {
     return;
   }
 
-  const context = getSelectedSentenceContext();
+  const context = getSelectedTextContext();
 
   if (!context) {
     const hadAnalysisOpen = analysisPanelOpen;
+    const hadSelectionOpen = Boolean(activeSelectionTooltipContext);
     hideSentenceAnalysis();
-    if (hadAnalysisOpen) {
+    if (hadAnalysisOpen || hadSelectionOpen) {
       hideTooltip();
     }
     return;
   }
 
-  hideTooltip();
-  showSentenceAnalysisButton(context);
+  cancelActiveAsyncRequests();
+  hideSentenceAnalysis();
+  renderSelectionTooltip(context);
+  void requestSelectionTranslation("google", context);
 }
 
 tooltip.card.addEventListener("mouseenter", () => {
@@ -1509,6 +1660,23 @@ tooltip.analysisTriggerButton.addEventListener("click", async () => {
   }
 
   suppressSelectionTriggerUntil = Date.now() + 1500;
+  await requestSentenceAnalysis(activeSelectionContext);
+});
+
+tooltip.selectionAnalysisButton.addEventListener("click", async () => {
+  if (!activeSelectionContext) {
+    return;
+  }
+
+  if (!isAnalyzableSelectionText(activeSelectionContext.text)) {
+    tooltip.hintEl.dataset.visible = "true";
+    tooltip.hintEl.dataset.loading = "false";
+    tooltip.hintEl.textContent = "这段内容太短，更适合直接看翻译。";
+    return;
+  }
+
+  suppressSelectionTriggerUntil = Date.now() + 1500;
+  cancelActiveAsyncRequests();
   await requestSentenceAnalysis(activeSelectionContext);
 });
 
@@ -1544,6 +1712,11 @@ tooltip.button.addEventListener("click", async () => {
 });
 
 tooltip.llmButton.addEventListener("click", async () => {
+  if (activeSelectionTooltipContext) {
+    await requestSelectionTranslation("llm", activeSelectionTooltipContext);
+    return;
+  }
+
   await requestTranslation("llm");
 });
 
@@ -1638,6 +1811,11 @@ document.addEventListener("mouseup", (event) => {
     return;
   }
 
+  if (event.detail >= 2) {
+    suppressSelectionTriggerUntil = Date.now() + 500;
+    return;
+  }
+
   window.setTimeout(() => {
     updateSelectionAnalysisTrigger();
   }, 0);
@@ -1671,13 +1849,14 @@ document.addEventListener("dblclick", () => {
       }
 
       await resolveHoverWord(context);
-      await requestTranslationForContext("llm", context);
     })();
   }, 0);
 });
 
 document.addEventListener("scroll", () => {
-  if (tooltip.host.style.display === "block") {
+  if (activeSelectionTooltipContext && tooltip.host.style.display === "block") {
+    positionTooltip(activeSelectionTooltipContext.rect);
+  } else if (tooltip.host.style.display === "block") {
     const context = getHoverContext(lastMouseX, lastMouseY);
     if (context) {
       positionTooltip(context.rect);
@@ -1694,6 +1873,10 @@ document.addEventListener("scroll", () => {
 });
 
 window.addEventListener("resize", () => {
+  if (activeSelectionTooltipContext && tooltip.host.style.display === "block") {
+    positionTooltip(activeSelectionTooltipContext.rect);
+  }
+
   if (analysisPanelOpen && activeSelectionContext) {
     positionSentenceAnalysisPanel(activeSelectionContext.rect);
   } else if (activeSelectionContext) {

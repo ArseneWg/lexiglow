@@ -1,6 +1,7 @@
 import type {
   LexiconLookupResult,
   SentenceAnalysisResult,
+  SelectionTranslationResult,
   TranslatorSettings,
   UserSettings,
 } from "./types";
@@ -84,6 +85,15 @@ export interface AnalyzeSelectionMessage {
   };
 }
 
+export interface TranslateSelectionMessage {
+  type: "TRANSLATE_SELECTION";
+  payload: {
+    text: string;
+    contextText?: string;
+    provider: TranslationProviderChoice;
+  };
+}
+
 export type RuntimeMessage =
   | LookupWordMessage
   | SetWordMasteredMessage
@@ -95,7 +105,8 @@ export type RuntimeMessage =
   | GetTranslatorSettingsMessage
   | SaveTranslatorSettingsMessage
   | TranslateWordMessage
-  | AnalyzeSelectionMessage;
+  | AnalyzeSelectionMessage
+  | TranslateSelectionMessage;
 
 export interface LookupWordResponse {
   ok: boolean;
@@ -118,5 +129,11 @@ export interface TranslatorSettingsResponse {
 export interface SentenceAnalysisResponse {
   ok: boolean;
   result?: SentenceAnalysisResult;
+  error?: string;
+}
+
+export interface SelectionTranslationResponse {
+  ok: boolean;
+  result?: SelectionTranslationResult;
   error?: string;
 }

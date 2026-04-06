@@ -4,6 +4,8 @@ export interface WordAtOffset {
   end: number;
 }
 
+const ENGLISH_WORD_RE = /^[A-Za-z]+(?:'[A-Za-z]+)?$/;
+
 function isWordCharacter(char: string | undefined): boolean {
   return Boolean(char && /[A-Za-z']/u.test(char));
 }
@@ -13,7 +15,37 @@ function isAlphaNumeric(char: string | undefined): boolean {
 }
 
 function isEnglishLikeWord(surface: string): boolean {
-  return /^[A-Za-z]+(?:'[A-Za-z]+)?$/.test(surface);
+  return ENGLISH_WORD_RE.test(surface);
+}
+
+export function normalizeSelectionText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+export function isSingleEnglishWord(surface: string): boolean {
+  return ENGLISH_WORD_RE.test(surface.trim());
+}
+
+export function countEnglishWords(text: string): number {
+  return normalizeSelectionText(text).match(/[A-Za-z]+(?:'[A-Za-z]+)?/g)?.length ?? 0;
+}
+
+export function isEnglishSelectionText(text: string): boolean {
+  const compact = normalizeSelectionText(text);
+
+  if (!compact || compact.length > 360 || /[\u4e00-\u9fff]/u.test(compact)) {
+    return false;
+  }
+
+  if (/[@#][A-Za-z0-9_]/.test(compact)) {
+    return false;
+  }
+
+  if (!/[A-Za-z]+(?:'[A-Za-z]+)?/.test(compact)) {
+    return false;
+  }
+
+  return true;
 }
 
 export function extractWordAtOffset(text: string, offset: number): WordAtOffset | null {

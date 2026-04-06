@@ -219,8 +219,8 @@ export async function translateWithLlm({
       {
         role: "system",
         content: needsSentence
-          ? 'Translate the target English word based on the sentence context. Return strict JSON only: {"word":"<concise Chinese meaning of the word>","sentence":"<full Chinese translation of the sentence>"}. No markdown, no explanation.'
-          : 'Translate the target English word into concise Chinese based on the sentence context. Return strict JSON only: {"word":"<concise Chinese meaning>"}',
+          ? 'Translate the target English word or short phrase based on the sentence context. Return strict JSON only: {"word":"<concise Chinese meaning of the word or phrase>","sentence":"<full Chinese translation of the sentence>"}. No markdown, no explanation.'
+          : 'Translate the target English word or short phrase into concise Chinese based on the sentence context. Return strict JSON only: {"word":"<concise Chinese meaning>"}',
       },
       {
         role: "user",

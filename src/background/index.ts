@@ -7,6 +7,7 @@ import type {
   RemoveWordIgnoredMessage,
   RuntimeMessage,
   SaveTranslatorSettingsMessage,
+  SelectionTranslationResponse,
   SetWordIgnoredMessage,
   SetWordMasteredMessage,
   SetWordUnmasteredMessage,
@@ -23,11 +24,13 @@ import {
   updateKnownBaseRank,
 } from "../shared/settings";
 import {
+  getCachedSelectionTranslation,
   getCachedTranslation,
   getSettings,
   getTranslatorSettings,
   saveSettings,
   saveTranslatorSettings,
+  setCachedSelectionTranslation,
   setCachedTranslation,
 } from "../shared/storage";
 import {
@@ -105,6 +108,49 @@ async function getOrTranslate(
   try {
     const result = await pending;
     await setCachedTranslation(lemma, contextText, provider, {
+      translation: result.translation,
+      sentenceTranslation: result.sentenceTranslation,
+      provider: result.provider,
+      updatedAt: Date.now(),
+    });
+    return result;
+  } finally {
+    inFlightTranslations.delete(requestKey);
+  }
+}
+
+async function getOrTranslateSelection(
+  text: string,
+  contextText: string,
+  provider: TranslationProviderChoice,
+): Promise<CacheEntry | TranslationResult> {
+  const requestKey = `selection::${provider}::${text}::${contextText}`;
+  const cached = await getCachedSelectionTranslation(text, contextText, provider);
+
+  if (cached?.translation) {
+    return {
+      translation: cached.translation,
+      sentenceTranslation: cached.sentenceTranslation,
+      provider: cached.provider,
+      cached: true,
+    };
+  }
+
+  let pending = inFlightTranslations.get(requestKey);
+
+  if (!pending) {
+    pending = translateByChoice({
+      provider,
+      lemma: text,
+      surface: text,
+      contextText,
+    });
+    inFlightTranslations.set(requestKey, pending);
+  }
+
+  try {
+    const result = await pending;
+    await setCachedSelectionTranslation(text, contextText, provider, {
       translation: result.translation,
       sentenceTranslation: result.sentenceTranslation,
       provider: result.provider,
@@ -215,6 +261,41 @@ async function handleAnalyzeSelection(
   });
 }
 
+async function handleTranslateSelection(
+  message: Extract<RuntimeMessage, { type: "TRANSLATE_SELECTION" }>,
+): Promise<SelectionTranslationResponse["result"]> {
+  const text = message.payload.text.trim();
+  const contextText = message.payload.contextText?.trim() ?? text;
+
+  if (!text) {
+    return {
+      text,
+      translation: "暂不可用",
+      translationProvider: message.payload.provider === "llm" ? "deepseek-chat" : "google-web",
+      cached: false,
+    };
+  }
+
+  try {
+    const translation = await getOrTranslateSelection(text, contextText, message.payload.provider);
+
+    return {
+      text,
+      translation: translation.translation,
+      sentenceTranslation: translation.sentenceTranslation,
+      translationProvider: translation.provider,
+      cached: translation.cached,
+    };
+  } catch {
+    return {
+      text,
+      translation: "暂不可用",
+      translationProvider: message.payload.provider === "llm" ? "deepseek-chat" : "google-web",
+      cached: false,
+    };
+  }
+}
+
 async function handleSetMastered(message: SetWordMasteredMessage) {
   const settings = await getSettings();
   const next = setWordMastered(settings, message.payload.lemma);
@@ -277,6 +358,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
         break;
       case "ANALYZE_SELECTION":
         sendResponse({ ok: true, result: await handleAnalyzeSelection(message) });
+        break;
+      case "TRANSLATE_SELECTION":
+        sendResponse({ ok: true, result: await handleTranslateSelection(message) });
         break;
       case "SET_WORD_MASTERED":
         sendResponse(await handleSetMastered(message));

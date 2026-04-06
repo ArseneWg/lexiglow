@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { extractWordAtOffset } from "../src/shared/word";
+import {
+  countEnglishWords,
+  extractWordAtOffset,
+  isEnglishSelectionText,
+  isSingleEnglishWord,
+} from "../src/shared/word";
 
 describe("extractWordAtOffset", () => {
   test("extracts a word under the cursor", () => {
@@ -17,5 +22,28 @@ describe("extractWordAtOffset", () => {
 
   test("skips @mention handles", () => {
     expect(extractWordAtOffset("@somebody replied", 4)).toBeNull();
+  });
+});
+
+describe("selection helpers", () => {
+  test("detects a single english word", () => {
+    expect(isSingleEnglishWord("received")).toBe(true);
+    expect(isSingleEnglishWord("look up")).toBe(false);
+  });
+
+  test("accepts english words, phrases, and sentences", () => {
+    expect(isEnglishSelectionText("received")).toBe(true);
+    expect(isEnglishSelectionText("look up")).toBe(true);
+    expect(isEnglishSelectionText("He received the package yesterday.")).toBe(true);
+    expect(isEnglishSelectionText("Revenue grew by 12.5% in Q4/FY2025.")).toBe(true);
+  });
+
+  test("rejects mentions and non-english selections", () => {
+    expect(isEnglishSelectionText("@somebody replied")).toBe(false);
+    expect(isEnglishSelectionText("这是中文")).toBe(false);
+  });
+
+  test("counts english words in normalized selections", () => {
+    expect(countEnglishWords("in   charge   of")).toBe(3);
   });
 });

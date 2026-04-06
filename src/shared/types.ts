@@ -20,6 +20,14 @@ export interface TranslationResult {
   cached: boolean;
 }
 
+export interface SelectionTranslationResult {
+  text: string;
+  translation: string;
+  sentenceTranslation?: string;
+  translationProvider: string;
+  cached: boolean;
+}
+
 export type SentenceHighlightCategory =
   | "subject"
   | "predicate"

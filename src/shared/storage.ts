@@ -63,3 +63,29 @@ export async function setCachedTranslation(
     [getCacheKey(lemma, contextText, provider)]: entry,
   });
 }
+
+function normalizeSelectionCacheKey(text: string): string {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export async function getCachedSelectionTranslation(
+  text: string,
+  contextText = "",
+  provider = "",
+): Promise<CacheEntry | null> {
+  return getCachedTranslation(`selection:${normalizeSelectionCacheKey(text)}`, contextText, provider);
+}
+
+export async function setCachedSelectionTranslation(
+  text: string,
+  contextText: string,
+  provider: string,
+  entry: CacheEntry,
+): Promise<void> {
+  await setCachedTranslation(
+    `selection:${normalizeSelectionCacheKey(text)}`,
+    contextText,
+    provider,
+    entry,
+  );
+}
