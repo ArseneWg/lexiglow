@@ -1025,10 +1025,23 @@ function rankLabel(result: LexiconLookupResult): string {
 }
 
 function runtimeSend<T>(message: RuntimeMessage): Promise<T> {
-  return chrome.runtime.sendMessage(message) as Promise<T>;
+  const runtimeApi = globalThis.chrome?.runtime;
+
+  if (!runtimeApi?.sendMessage) {
+    return Promise.reject(new Error("Extension context invalidated."));
+  }
+
+  return runtimeApi.sendMessage(message) as Promise<T>;
 }
 
 function isExtensionContextInvalidated(error: unknown): boolean {
+  if (
+    error instanceof TypeError &&
+    error.message.toLowerCase().includes("sendmessage")
+  ) {
+    return true;
+  }
+
   return (
     error instanceof Error &&
     error.message.toLowerCase().includes("extension context invalidated")
@@ -1885,6 +1898,20 @@ function scheduleLookup(context: HoverContext) {
   }, HOVER_DELAY_MS);
 }
 
+function isSameHoverTarget(context: HoverContext): boolean {
+  if (!activeContext || !activeAnchorRect) {
+    return false;
+  }
+
+  return (
+    activeContext.surface === context.surface &&
+    Math.abs(activeAnchorRect.left - context.rect.left) < 1 &&
+    Math.abs(activeAnchorRect.top - context.rect.top) < 1 &&
+    Math.abs(activeAnchorRect.width - context.rect.width) < 1 &&
+    Math.abs(activeAnchorRect.height - context.rect.height) < 1
+  );
+}
+
 function getHoverContext(clientX: number, clientY: number): HoverContext | null {
   const caret = getCaretRangeFromPoint(clientX, clientY);
 
@@ -2080,19 +2107,19 @@ document.addEventListener(
       return;
     }
 
-    if (
+    const context = getHoverContext(event.clientX, event.clientY);
+    const pointerProtected =
       tooltip.host.style.display === "block" &&
       (isPointerNearTooltip(event.clientX, event.clientY) ||
         isPointerNearAnchor(event.clientX, event.clientY) ||
-        isPointerInTooltipCorridor(event.clientX, event.clientY))
-    ) {
+        isPointerInTooltipCorridor(event.clientX, event.clientY));
+
+    if (pointerProtected && context && isSameHoverTarget(context)) {
       if (hideTimer) {
         window.clearTimeout(hideTimer);
       }
       return;
     }
-
-    const context = getHoverContext(event.clientX, event.clientY);
 
     if (!context) {
       if (
@@ -2225,7 +2252,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
+globalThis.chrome?.storage?.onChanged?.addListener?.((changes, areaName) => {
   if (areaName !== "sync" || !changes.userSettings) {
     return;
   }
