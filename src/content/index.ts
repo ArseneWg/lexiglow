@@ -399,6 +399,27 @@ function isEnglishLikeWord(surface: string): boolean {
   return /^[A-Za-z]+(?:'[A-Za-z]+)?$/.test(surface);
 }
 
+function isTechnicalBoundaryCharacter(char: string | undefined): boolean {
+  return Boolean(char && /[_@./\\-]/u.test(char));
+}
+
+function isUrlSchemeBoundary(text: string, start: number, end: number): boolean {
+  return (
+    (text[end] === ":" && text[end + 1] === "/") ||
+    (text[start - 1] === "/" && text[start - 2] === ":")
+  );
+}
+
+function isEmbeddedInTechnicalToken(text: string, start: number, end: number): boolean {
+  return (
+    isAlphaNumeric(text[start - 1]) ||
+    isAlphaNumeric(text[end]) ||
+    isTechnicalBoundaryCharacter(text[start - 1]) ||
+    isTechnicalBoundaryCharacter(text[end]) ||
+    isUrlSchemeBoundary(text, start, end)
+  );
+}
+
 function extractSentenceAroundRange(text: string, start: number, end: number): string {
   const leftBoundary = Math.max(
     text.lastIndexOf(".", start - 1),
@@ -450,11 +471,7 @@ function extractWordAtOffset(text: string, offset: number): WordAtOffset | null 
     end += 1;
   }
 
-  if (isAlphaNumeric(text[start - 1]) || isAlphaNumeric(text[end])) {
-    return null;
-  }
-
-  if (text[start - 1] === "@") {
+  if (isEmbeddedInTechnicalToken(text, start, end)) {
     return null;
   }
 
@@ -1484,8 +1501,10 @@ async function refreshHighlights() {
     let match = matcher.exec(text);
     while (match && pendingCount < HIGHLIGHT_SCAN_LIMIT) {
       const surface = match[0];
+      const start = match.index;
+      const end = match.index + surface.length;
 
-      if (text[match.index - 1] === "@") {
+      if (isEmbeddedInTechnicalToken(text, start, end)) {
         match = matcher.exec(text);
         continue;
       }
@@ -1496,8 +1515,8 @@ async function refreshHighlights() {
 
       if (flags.shouldTranslate) {
         const range = document.createRange();
-        range.setStart(textNode, match.index);
-        range.setEnd(textNode, match.index + surface.length);
+        range.setStart(textNode, start);
+        range.setEnd(textNode, end);
         const rect = range.getBoundingClientRect();
 
         if (isVisibleRect(rect)) {

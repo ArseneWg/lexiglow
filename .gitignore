@@ -1,3 +1,4 @@
 dist
 node_modules
 src/generated/lexicon.ts
+.chrome-extension-key.pem

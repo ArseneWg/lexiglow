@@ -23,6 +23,13 @@ describe("extractWordAtOffset", () => {
   test("skips @mention handles", () => {
     expect(extractWordAtOffset("@somebody replied", 4)).toBeNull();
   });
+
+  test("skips technical tokens with punctuation or underscores", () => {
+    expect(extractWordAtOffset(".yaml file", 2)).toBeNull();
+    expect(extractWordAtOffset("dev_err happened", 2)).toBeNull();
+    expect(extractWordAtOffset("linux-rockchip@ host", 2)).toBeNull();
+    expect(extractWordAtOffset("example.com/docs", 2)).toBeNull();
+  });
 });
 
 describe("selection helpers", () => {
@@ -41,6 +48,14 @@ describe("selection helpers", () => {
   test("rejects mentions and non-english selections", () => {
     expect(isEnglishSelectionText("@somebody replied")).toBe(false);
     expect(isEnglishSelectionText("这是中文")).toBe(false);
+  });
+
+  test("rejects technical identifiers and file-like tokens", () => {
+    expect(isEnglishSelectionText("reg16")).toBe(false);
+    expect(isEnglishSelectionText(".yaml")).toBe(false);
+    expect(isEnglishSelectionText("dev_err")).toBe(false);
+    expect(isEnglishSelectionText("linux-rockchip@")).toBe(false);
+    expect(isEnglishSelectionText("https://example.com/docs")).toBe(false);
   });
 
   test("counts english words in normalized selections", () => {

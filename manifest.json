@@ -3,6 +3,7 @@
   "name": "WordWise Hover Translator",
   "version": "0.1.0",
   "description": "Hover English words on web pages to see Chinese translations for unfamiliar vocabulary.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnna1ON3NFSUMib9t/2D6c6LeulfZloKXuqhQXYRYYtL8rQtyVqHJbQyvWRmSifCXZ7yDNDXFPkD0rrHYu9NT0HhaU8c90k2SJETZAKkJ7ZvqzUR/CSvuOTAu2vn5kNaNhUgAqEcLW31vDro7ti2wo184n/TyauxH50Sk82mc6skQWshgMBFQ+8cveH6QXJHGsW03DzWBjpGJ/DB2TCoHD/LDr+mddl/uU0+N5/pqQYV0jTgQFT3aEAcV5jFhJWO75FgIv/fW4c0eEPC2WjP2f9JAcqtU5uf++uUx03gRC4zKRUX1KDdiS68AlvnZJzO8H6ZE5s5mqHb25sEJ7nFdkQIDAQAB",
   "permissions": ["storage", "tabs", "tts"],
   "host_permissions": [
     "https://translate.googleapis.com/*",

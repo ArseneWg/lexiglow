@@ -18,6 +18,43 @@ function isEnglishLikeWord(surface: string): boolean {
   return ENGLISH_WORD_RE.test(surface);
 }
 
+function isTechnicalBoundaryCharacter(char: string | undefined): boolean {
+  return Boolean(char && /[_@./\\-]/u.test(char));
+}
+
+function isUrlSchemeBoundary(text: string, start: number, end: number): boolean {
+  return (
+    (text[end] === ":" && text[end + 1] === "/") ||
+    (text[start - 1] === "/" && text[start - 2] === ":")
+  );
+}
+
+function isEmbeddedInTechnicalToken(text: string, start: number, end: number): boolean {
+  return (
+    isAlphaNumeric(text[start - 1]) ||
+    isAlphaNumeric(text[end]) ||
+    isTechnicalBoundaryCharacter(text[start - 1]) ||
+    isTechnicalBoundaryCharacter(text[end]) ||
+    isUrlSchemeBoundary(text, start, end)
+  );
+}
+
+function isLikelyTechnicalToken(text: string): boolean {
+  const compact = normalizeSelectionText(text);
+
+  if (!compact || /\s/.test(compact)) {
+    return false;
+  }
+
+  return (
+    /^(https?:\/\/|www\.)/i.test(compact) ||
+    compact.startsWith(".") ||
+    /[@_\\/]/.test(compact) ||
+    /[A-Za-z]+\d|\d+[A-Za-z]/.test(compact) ||
+    compact.includes(".")
+  );
+}
+
 export function normalizeSelectionText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -42,6 +79,10 @@ export function isEnglishSelectionText(text: string): boolean {
   }
 
   if (!/[A-Za-z]+(?:'[A-Za-z]+)?/.test(compact)) {
+    return false;
+  }
+
+  if (isLikelyTechnicalToken(compact)) {
     return false;
   }
 
@@ -76,11 +117,7 @@ export function extractWordAtOffset(text: string, offset: number): WordAtOffset 
     end += 1;
   }
 
-  if (isAlphaNumeric(text[start - 1]) || isAlphaNumeric(text[end])) {
-    return null;
-  }
-
-  if (text[start - 1] === "@") {
+  if (isEmbeddedInTechnicalToken(text, start, end)) {
     return null;
   }
 
