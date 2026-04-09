@@ -75,4 +75,9 @@ describe("settings resolution", () => {
     expect(looksLikeSpecialTerm("ClaudeCode", "claudecode", null)).toBe(true);
     expect(looksLikeSpecialTerm("received", "received", 891)).toBe(false);
   });
+
+  test("treats title-cased low-frequency words and handle-like clusters as ignored", () => {
+    expect(looksLikeSpecialTerm("Torvalds", "torvalds", 9000)).toBe(true);
+    expect(looksLikeSpecialTerm("swyx", "swyx", null)).toBe(true);
+  });
 });

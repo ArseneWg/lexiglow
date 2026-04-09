@@ -6,6 +6,11 @@ export interface WordAtOffset {
 
 const ENGLISH_WORD_RE = /^[A-Za-z]+(?:'[A-Za-z]+)?$/;
 
+export function normalizeSingleEnglishWord(surface: string): string {
+  const compact = surface.trim().replace(/^[^A-Za-z']+|[^A-Za-z']+$/g, "");
+  return ENGLISH_WORD_RE.test(compact) ? compact : "";
+}
+
 function isWordCharacter(char: string | undefined): boolean {
   return Boolean(char && /[A-Za-z']/u.test(char));
 }
@@ -60,7 +65,7 @@ export function normalizeSelectionText(text: string): string {
 }
 
 export function isSingleEnglishWord(surface: string): boolean {
-  return ENGLISH_WORD_RE.test(surface.trim());
+  return Boolean(normalizeSingleEnglishWord(surface));
 }
 
 export function countEnglishWords(text: string): number {

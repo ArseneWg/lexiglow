@@ -5,6 +5,7 @@ import {
   extractWordAtOffset,
   isEnglishSelectionText,
   isSingleEnglishWord,
+  normalizeSingleEnglishWord,
 } from "../src/shared/word";
 
 describe("extractWordAtOffset", () => {
@@ -35,7 +36,13 @@ describe("extractWordAtOffset", () => {
 describe("selection helpers", () => {
   test("detects a single english word", () => {
     expect(isSingleEnglishWord("received")).toBe(true);
+    expect(isSingleEnglishWord("received.")).toBe(true);
     expect(isSingleEnglishWord("look up")).toBe(false);
+  });
+
+  test("normalizes single selected words by trimming edge punctuation", () => {
+    expect(normalizeSingleEnglishWord("\"received.\"")).toBe("received");
+    expect(normalizeSingleEnglishWord("(continue)")).toBe("continue");
   });
 
   test("accepts english words, phrases, and sentences", () => {

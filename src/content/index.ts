@@ -11,7 +11,12 @@ import type {
 } from "../shared/messages";
 import { DEFAULT_SETTINGS, resolveWordFlags } from "../shared/settings";
 import { getSettings } from "../shared/storage";
-import { isEnglishSelectionText, isSingleEnglishWord, normalizeSelectionText } from "../shared/word";
+import {
+  isEnglishSelectionText,
+  isSingleEnglishWord,
+  normalizeSelectionText,
+  normalizeSingleEnglishWord,
+} from "../shared/word";
 import type {
   LexiconLookupResult,
   PronunciationAccent,
@@ -924,13 +929,31 @@ function getSelectedWordContext(): HoverContext | null {
     return null;
   }
 
-  const surface = selection.toString().trim();
+  const rawSurface = selection.toString();
+  const surface = normalizeSingleEnglishWord(rawSurface);
 
-  if (!isSingleEnglishWord(surface)) {
+  if (!surface || !isSingleEnglishWord(surface)) {
     return null;
   }
 
   const range = selection.getRangeAt(0).cloneRange();
+
+  if (
+    rawSurface.trim() !== surface &&
+    range.startContainer.nodeType === Node.TEXT_NODE &&
+    range.startContainer === range.endContainer
+  ) {
+    const baseStartOffset = range.startOffset;
+    const trimmedStart = rawSurface.search(/[A-Za-z']/);
+
+    if (trimmedStart >= 0) {
+      range.setStart(range.startContainer, baseStartOffset + trimmedStart);
+      range.setEnd(range.endContainer, baseStartOffset + trimmedStart + surface.length);
+    } else {
+      range.setEnd(range.endContainer, baseStartOffset + surface.length);
+    }
+  }
+
   const rect = range.getBoundingClientRect();
 
   if ((!rect.width && !rect.height) || !isFinite(rect.left) || !isFinite(rect.top)) {

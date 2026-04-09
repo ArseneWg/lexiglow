@@ -16,6 +16,12 @@ function uniqueNormalizedWords(words: string[]): string[] {
 
 export function looksLikeSpecialTerm(surface: string, lemma: string, rank: number | null): boolean {
   if (!surface || !lemma || rank !== null) {
+    const trimmedKnown = surface.trim();
+
+    if (/^[A-Z][a-z]{2,}$/.test(trimmedKnown) && rank !== null && rank > 6000) {
+      return true;
+    }
+
     return false;
   }
 
@@ -30,6 +36,14 @@ export function looksLikeSpecialTerm(surface: string, lemma: string, rank: numbe
   }
 
   if (lemma.length >= 15) {
+    return true;
+  }
+
+  if (/^[a-z]{3,12}$/i.test(trimmed) && /[bcdfghjklmnpqrstvwxyz]{4,}/i.test(trimmed)) {
+    return true;
+  }
+
+  if (/^[a-z]{3,8}$/i.test(trimmed) && !/[aeiouy]/i.test(trimmed)) {
     return true;
   }
 
@@ -103,6 +117,17 @@ export function resolveWordFlags(
     };
   }
 
+  const userMastered = settings.masteredOverrides.includes(lemma);
+
+  if (userMastered) {
+    return {
+      isIgnored: false,
+      isKnown: true,
+      shouldTranslate: false,
+      reason: "known",
+    };
+  }
+
   if (looksLikeSpecialTerm(surface, lemma, rank)) {
     return {
       isIgnored: true,
@@ -112,7 +137,6 @@ export function resolveWordFlags(
     };
   }
 
-  const userMastered = settings.masteredOverrides.includes(lemma);
   const inKnownBase = rank !== null && rank <= settings.knownBaseRank;
   const isKnown = userMastered || (inKnownBase && !forceUnmastered);
 
