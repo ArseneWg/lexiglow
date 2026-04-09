@@ -1955,6 +1955,18 @@ function getHoverContext(clientX: number, clientY: number): HoverContext | null 
     return null;
   }
 
+  const horizontalPadding = 1;
+  const verticalPadding = 2;
+
+  if (
+    clientX < rect.left - horizontalPadding ||
+    clientX > rect.right + horizontalPadding ||
+    clientY < rect.top - verticalPadding ||
+    clientY > rect.bottom + verticalPadding
+  ) {
+    return null;
+  }
+
   activeRequestId += 1;
 
   return {
@@ -2212,24 +2224,18 @@ document.addEventListener("dblclick", () => {
   }, 0);
 });
 
-document.addEventListener("scroll", () => {
-  if (activeSelectionTooltipContext && tooltip.host.style.display === "block") {
-    positionTooltip(activeSelectionTooltipContext.rect);
-  } else if (tooltip.host.style.display === "block") {
-    const context = getHoverContext(lastMouseX, lastMouseY);
-    if (context) {
-      positionTooltip(context.rect);
+document.addEventListener(
+  "scroll",
+  () => {
+    if (tooltip.host.style.display === "block") {
+      hideTooltip();
+      hideSentenceAnalysis();
     }
-  }
 
-  if (analysisPanelOpen && activeSelectionContext) {
-    positionSentenceAnalysisPanel(activeSelectionContext.rect);
-  } else if (activeSelectionContext) {
-    positionSentenceAnalysisButton(activeSelectionContext.rect);
-  }
-
-  scheduleHighlightRefresh();
-});
+    scheduleHighlightRefresh();
+  },
+  { capture: true, passive: true },
+);
 
 window.addEventListener("resize", () => {
   if (activeSelectionTooltipContext && tooltip.host.style.display === "block") {
