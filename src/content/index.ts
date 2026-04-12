@@ -459,6 +459,19 @@ const TOOLTIP_STYLE = `
     font-family: inherit;
     font-size: 14px;
   }
+  .wordwise-analysis-step-intro {
+    display: block;
+    margin-bottom: 6px;
+  }
+  .wordwise-analysis-substeps {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    color: #334155;
+  }
+  .wordwise-analysis-substeps li {
+    margin-bottom: 6px;
+    line-height: 1.65;
+  }
   .wordwise-analysis-legend {
     display: flex;
     gap: 8px;
@@ -477,6 +490,15 @@ const TOOLTIP_STYLE = `
     color: #1f2a44;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
+  }
+  .wordwise-clause-subblock {
+    display: inline-block;
+    vertical-align: baseline;
+    padding: 0 4px 1px;
+    border-radius: 999px;
+    margin: 1px 3px 2px 0;
+    background: rgba(255, 255, 255, 0.22);
+    box-shadow: inset 0 0 0 1px rgba(31, 42, 68, 0.08);
   }
   .wordwise-clause-block--tone-0 {
     background: #f8d2e7;
@@ -989,6 +1011,118 @@ function renderTextRangeWithAssignments(
   return markup;
 }
 
+function buildInnerClauseSegments(text: string): Array<{ start: number; end: number }> {
+  const words = text.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? [];
+
+  if (words.length < 10) {
+    return [{ start: 0, end: text.length }];
+  }
+
+  const boundaryPattern =
+    /,\s+|\b(?:which|who|whom|whose|that|how|whether|why|because|if|although|though|when|where|while|but|and|through|with|over|by|for|into)\b/gi;
+  const boundaries = [0];
+  let match = boundaryPattern.exec(text);
+
+  while (match) {
+    const boundaryIndex = match[0].startsWith(",") ? match.index + match[0].length : match.index;
+    const previous = boundaries[boundaries.length - 1];
+
+    if (boundaryIndex - previous >= 18) {
+      boundaries.push(boundaryIndex);
+    }
+
+    match = boundaryPattern.exec(text);
+  }
+
+  if (text.length - boundaries[boundaries.length - 1] < 18 && boundaries.length > 1) {
+    boundaries.pop();
+  }
+
+  boundaries.push(text.length);
+
+  const segments: Array<{ start: number; end: number }> = [];
+
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const start = boundaries[index];
+    const end = boundaries[index + 1];
+
+    if (end <= start) {
+      continue;
+    }
+
+    segments.push({ start, end });
+  }
+
+  return segments.length > 1 ? segments : [{ start: 0, end: text.length }];
+}
+
+function renderClauseBlockContent(
+  sentence: string,
+  start: number,
+  end: number,
+  tokens: SentenceWordToken[],
+  assignments: Map<number, keyof typeof HIGHLIGHT_CATEGORY_META>,
+): string {
+  const blockText = sentence.slice(start, end);
+  const segments = buildInnerClauseSegments(blockText);
+
+  if (segments.length === 1) {
+    return renderTextRangeWithAssignments(sentence, start, end, tokens, assignments);
+  }
+
+  return segments
+    .map((segment) => {
+      const segmentText = sentence.slice(start + segment.start, start + segment.end);
+
+      if (!/[A-Za-z]/.test(segmentText)) {
+        return escapeHtml(segmentText);
+      }
+
+      return `<span class="wordwise-clause-subblock">${renderTextRangeWithAssignments(
+        sentence,
+        start + segment.start,
+        start + segment.end,
+        tokens,
+        assignments,
+      )}</span>`;
+    })
+    .join("");
+}
+
+function formatAnalysisStepMarkup(step: string): string {
+  const trimmed = step.trim();
+  const subStepPattern = /(?:^|\s)(\d+[\)）])/g;
+  const markers = [...trimmed.matchAll(subStepPattern)];
+
+  if (markers.length < 2) {
+    return escapeHtml(trimmed);
+  }
+
+  const firstMarkerIndex = markers[0]?.index ?? -1;
+
+  if (firstMarkerIndex < 0) {
+    return escapeHtml(trimmed);
+  }
+
+  const intro = trimmed.slice(0, firstMarkerIndex).trim().replace(/[:：]\s*$/, "");
+  const items = markers.map((marker, index) => {
+    const markerIndex = marker.index ?? 0;
+    const start = markerIndex + marker[0].length;
+    const nextMarkerIndex = index + 1 < markers.length ? (markers[index + 1].index ?? trimmed.length) : trimmed.length;
+    const content = trimmed.slice(start, nextMarkerIndex).trim();
+    return content;
+  }).filter(Boolean);
+
+  if (!items.length) {
+    return escapeHtml(trimmed);
+  }
+
+  const introMarkup = intro ? `<span class="wordwise-analysis-step-intro">${escapeHtml(intro)}</span>` : "";
+  const listMarkup = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+
+  return `${introMarkup}<ol class="wordwise-analysis-substeps">${listMarkup}</ol>`;
+}
+
 function renderLegendMarkup(result: SentenceAnalysisResult, sentence: string): string {
   const assignments = buildHighlightAssignments(result, sentence);
   const categories = [
@@ -1041,7 +1175,7 @@ function renderSentenceWithClauseBlocks(
 
       if (/[A-Za-z]/.test(gapText)) {
         const gapClassName = CLAUSE_BLOCK_TONE_CLASSES[matchedCount % CLAUSE_BLOCK_TONE_CLASSES.length];
-        markup += `<span class="wordwise-clause-block ${gapClassName}">${renderTextRangeWithAssignments(
+        markup += `<span class="wordwise-clause-block ${gapClassName}">${renderClauseBlockContent(
           sentence,
           cursor,
           block.start,
@@ -1055,7 +1189,7 @@ function renderSentenceWithClauseBlocks(
     }
 
     const className = CLAUSE_BLOCK_TONE_CLASSES[matchedCount % CLAUSE_BLOCK_TONE_CLASSES.length];
-    markup += `<span class="wordwise-clause-block ${className}">${renderTextRangeWithAssignments(
+    markup += `<span class="wordwise-clause-block ${className}">${renderClauseBlockContent(
       sentence,
       block.start,
       block.end,
@@ -1075,7 +1209,7 @@ function renderSentenceWithClauseBlocks(
 
     if (/[A-Za-z]/.test(tailText)) {
       const tailClassName = CLAUSE_BLOCK_TONE_CLASSES[matchedCount % CLAUSE_BLOCK_TONE_CLASSES.length];
-      markup += `<span class="wordwise-clause-block ${tailClassName}">${renderTextRangeWithAssignments(
+      markup += `<span class="wordwise-clause-block ${tailClassName}">${renderClauseBlockContent(
         sentence,
         cursor,
         sentence.length,
@@ -1958,7 +2092,7 @@ function renderSentenceAnalysisPanel(
   tooltip.analysisTranslationEl.textContent = result.translation;
   tooltip.analysisStructureEl.textContent = result.structure;
   tooltip.analysisStepsEl.innerHTML = result.analysisSteps
-    .map((step) => `<li>${escapeHtml(step)}</li>`)
+    .map((step) => `<li>${formatAnalysisStepMarkup(step)}</li>`)
     .join("");
   tooltip.host.style.display = "block";
   analysisPanelOpen = true;

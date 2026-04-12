@@ -375,12 +375,24 @@ async function handleAnalyzeSelection(
 ): Promise<SentenceAnalysisResult> {
   const text = message.payload.text.trim();
   const translatorSettings = await getTranslatorSettings();
-  const result = await analyzeSentenceWithLlm({
-    text,
-    settings: translatorSettings,
-  });
+  try {
+    return await analyzeSentenceWithLlm({
+      text,
+      settings: translatorSettings,
+    });
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : "";
+    console.warn("[LexiGlow][sentence-analysis][background]", {
+      text,
+      message: messageText,
+    });
 
-  return result;
+    if (/json|parse|format/i.test(messageText)) {
+      throw new Error("长难句分析返回格式不稳定，请重试一次。");
+    }
+
+    throw error;
+  }
 }
 
 async function handleTranslateSelection(

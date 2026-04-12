@@ -172,6 +172,27 @@ const ANALYSIS_PLAIN_PREPOSITIONS = new Set([
   "without", "within", "across",
 ]);
 
+const ANALYSIS_PAIR_SEPARATOR = "|||";
+
+function parseAnalysisPair(
+  value: string,
+): { left: string; right: string } | null {
+  const separatorIndex = value.indexOf(ANALYSIS_PAIR_SEPARATOR);
+
+  if (separatorIndex < 0) {
+    return null;
+  }
+
+  const left = cleanModelOutput(value.slice(0, separatorIndex));
+  const right = cleanModelOutput(value.slice(separatorIndex + ANALYSIS_PAIR_SEPARATOR.length));
+
+  if (!left || !right) {
+    return null;
+  }
+
+  return { left, right };
+}
+
 function sanitizeAnalysisHighlights(input: unknown): SentenceHighlight[] {
   if (!Array.isArray(input)) {
     return [];
@@ -179,6 +200,27 @@ function sanitizeAnalysisHighlights(input: unknown): SentenceHighlight[] {
 
   return input
     .map((item) => {
+      if (typeof item === "string") {
+        const parsedPair = parseAnalysisPair(item);
+
+        if (!parsedPair) {
+          return null;
+        }
+
+        const category = parsedPair.left as SentenceHighlightCategory;
+        const text = parsedPair.right;
+        const normalized = text.toLowerCase();
+
+        if (
+          !HIGHLIGHT_CATEGORIES.has(category) ||
+          (category !== "preposition" && ANALYSIS_PLAIN_PREPOSITIONS.has(normalized))
+        ) {
+          return null;
+        }
+
+        return { text, category };
+      }
+
       if (!item || typeof item !== "object") {
         return null;
       }
@@ -241,6 +283,27 @@ function sanitizeClauseBlocks(input: unknown): SentenceClauseBlock[] {
 
   return input
     .map((item) => {
+      if (typeof item === "string") {
+        const parsedPair = parseAnalysisPair(item);
+
+        if (!parsedPair) {
+          return null;
+        }
+
+        const type = parsedPair.left as SentenceClauseBlockType;
+        const text = parsedPair.right;
+
+        if (!text || !CLAUSE_BLOCK_TYPES.has(type)) {
+          return null;
+        }
+
+        return {
+          text,
+          type,
+          label: undefined,
+        };
+      }
+
       if (!item || typeof item !== "object") {
         return null;
       }
@@ -276,10 +339,35 @@ function extractJsonObjectText(content: string): string {
   const jsonEnd = stripped.lastIndexOf("}");
 
   if (jsonStart < 0 || jsonEnd <= jsonStart) {
-    throw new Error("Sentence analysis response was not valid JSON.");
+    throw new SentenceAnalysisFormatError("Sentence analysis response was not valid JSON.");
   }
 
   return stripped.slice(jsonStart, jsonEnd + 1);
+}
+
+export class SentenceAnalysisFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SentenceAnalysisFormatError";
+  }
+}
+
+class SentenceAnalysisRequestError extends Error {
+  status?: number;
+  responseText?: string;
+  stage?: string;
+
+  constructor(message: string, options?: { status?: number; responseText?: string; stage?: string }) {
+    super(message);
+    this.name = "SentenceAnalysisRequestError";
+    this.status = options?.status;
+    this.responseText = options?.responseText;
+    this.stage = options?.stage;
+  }
+}
+
+function logSentenceAnalysisDebug(event: string, detail: Record<string, unknown>) {
+  console.warn("[LexiGlow][sentence-analysis]", event, detail);
 }
 
 function repairLooseJson(jsonText: string): string {
@@ -353,9 +441,99 @@ function parseJsonObjectWithRepair<T>(payload: string): T {
 
   try {
     return JSON.parse(rawJson) as T;
-  } catch {
-    return JSON.parse(repairLooseJson(rawJson)) as T;
+  } catch (error) {
+    try {
+      return JSON.parse(repairLooseJson(rawJson)) as T;
+    } catch {
+      throw new SentenceAnalysisFormatError(
+        error instanceof Error ? error.message : "Sentence analysis response was not valid JSON.",
+      );
+    }
   }
+}
+
+type SentenceAnalysisFrame = {
+  translation: string;
+  structure: string;
+  highlights: SentenceHighlight[];
+  clauseBlocks: SentenceClauseBlock[];
+};
+
+function parseSentenceAnalysisFrameResponse(payload: string): SentenceAnalysisFrame {
+  const parsed = parseJsonObjectWithRepair<{
+    translation?: unknown;
+    structure?: unknown;
+    highlights?: unknown;
+    clauseBlocks?: unknown;
+  }>(payload);
+
+  const translation = cleanModelOutput(
+    typeof parsed.translation === "string" ? parsed.translation : "",
+  );
+  const structure = cleanModelOutput(typeof parsed.structure === "string" ? parsed.structure : "");
+  const highlights = sanitizeAnalysisHighlights(parsed.highlights);
+  const clauseBlocks = sanitizeClauseBlocks(parsed.clauseBlocks);
+
+  if (!translation || !structure || !clauseBlocks.length) {
+    throw new SentenceAnalysisFormatError("Sentence analysis frame response was incomplete.");
+  }
+
+  return {
+    translation,
+    structure,
+    highlights,
+    clauseBlocks,
+  };
+}
+
+function parseSentenceAnalysisSummariesResponse(payload: string): string[] {
+  const parsed = parseJsonObjectWithRepair<{
+    analysisSteps?: unknown;
+    cutSummary?: unknown;
+    backboneSummary?: unknown;
+    branchSummary?: unknown;
+    translationSummary?: unknown;
+  }>(payload);
+
+  const analysisStepsFromArray = Array.isArray(parsed.analysisSteps)
+    ? parsed.analysisSteps
+        .map((step) => cleanModelOutput(typeof step === "string" ? step : ""))
+        .filter(Boolean)
+    : [];
+  const analysisStepsFromFields = [
+    cleanModelOutput(typeof parsed.cutSummary === "string" ? parsed.cutSummary : ""),
+    cleanModelOutput(typeof parsed.backboneSummary === "string" ? parsed.backboneSummary : ""),
+    cleanModelOutput(typeof parsed.branchSummary === "string" ? parsed.branchSummary : ""),
+    cleanModelOutput(typeof parsed.translationSummary === "string" ? parsed.translationSummary : ""),
+  ].filter(Boolean);
+  const analysisSteps =
+    analysisStepsFromArray.length >= 4 ? analysisStepsFromArray : analysisStepsFromFields;
+
+  if (analysisSteps.length < 3) {
+    throw new SentenceAnalysisFormatError("Sentence analysis summaries response was incomplete.");
+  }
+
+  return analysisSteps.slice(0, 4);
+}
+
+function buildFallbackAnalysisSteps(
+  frame: SentenceAnalysisFrame,
+  sentence: string,
+): string[] {
+  const wordCount = sentence.match(/[A-Za-z]+(?:[-'][A-Za-z]+)*/g)?.length ?? 0;
+  const blockHint =
+    frame.clauseBlocks.length > 1
+      ? `这句可以先按 ${frame.clauseBlocks.length} 个彩色句块来切层次。`
+      : wordCount > 16
+        ? "这句可以先抓主干，再按从句和修饰链往后拆。"
+        : "这句整体不算复杂，先抓主干再看修饰部分即可。";
+
+  return [
+    blockHint,
+    `主干先抓成：${frame.structure}`,
+    "再看彩色句块之间的从句、并列、非谓语和介词修饰关系。",
+    `最后顺着中文表达整句可译为：${frame.translation}`,
+  ];
 }
 
 export function parseSentenceAnalysisResponse(payload: string): Omit<
@@ -366,6 +544,10 @@ export function parseSentenceAnalysisResponse(payload: string): Omit<
     translation?: unknown;
     structure?: unknown;
     analysisSteps?: unknown;
+    cutSummary?: unknown;
+    backboneSummary?: unknown;
+    branchSummary?: unknown;
+    translationSummary?: unknown;
     highlights?: unknown;
     clauseBlocks?: unknown;
   }>(payload);
@@ -374,16 +556,24 @@ export function parseSentenceAnalysisResponse(payload: string): Omit<
     typeof parsed.translation === "string" ? parsed.translation : "",
   );
   const structure = cleanModelOutput(typeof parsed.structure === "string" ? parsed.structure : "");
-  const analysisSteps = Array.isArray(parsed.analysisSteps)
+  const analysisStepsFromArray = Array.isArray(parsed.analysisSteps)
     ? parsed.analysisSteps
         .map((step) => cleanModelOutput(typeof step === "string" ? step : ""))
         .filter(Boolean)
     : [];
+  const analysisStepsFromFields = [
+    cleanModelOutput(typeof parsed.cutSummary === "string" ? parsed.cutSummary : ""),
+    cleanModelOutput(typeof parsed.backboneSummary === "string" ? parsed.backboneSummary : ""),
+    cleanModelOutput(typeof parsed.branchSummary === "string" ? parsed.branchSummary : ""),
+    cleanModelOutput(typeof parsed.translationSummary === "string" ? parsed.translationSummary : ""),
+  ].filter(Boolean);
+  const analysisSteps =
+    analysisStepsFromArray.length >= 4 ? analysisStepsFromArray : analysisStepsFromFields;
   const highlights = sanitizeAnalysisHighlights(parsed.highlights);
   const clauseBlocks = sanitizeClauseBlocks(parsed.clauseBlocks);
 
   if (!translation || !structure || !analysisSteps.length) {
-    throw new Error("Sentence analysis response was incomplete.");
+    throw new SentenceAnalysisFormatError("Sentence analysis response was incomplete.");
   }
 
   return {
@@ -399,7 +589,11 @@ function sentenceAnalysisNeedsRetry(
   result: Omit<SentenceAnalysisResult, "provider" | "cached">,
   sentence: string,
 ): boolean {
-  if (result.highlights.length < 2 || result.clauseBlocks.length < 2) {
+  const wordCount = sentence.match(/[A-Za-z]+(?:[-'][A-Za-z]+)*/g)?.length ?? 0;
+  const minHighlights = wordCount <= 12 ? 1 : 2;
+  const minBlocks = wordCount <= 12 ? 1 : 2;
+
+  if (result.highlights.length < minHighlights || result.clauseBlocks.length < minBlocks) {
     return true;
   }
 
@@ -418,6 +612,10 @@ function sentenceAnalysisNeedsRetry(
   }
 
   const signalCategories = new Set(result.highlights.map((item) => item.category));
+  if (wordCount <= 12) {
+    return signalCategories.size < 1;
+  }
+
   return signalCategories.size < 2;
 }
 
@@ -444,17 +642,28 @@ async function requestSentenceAnalysis({
   model,
   sentence,
   systemPrompt,
+  useJsonResponseFormat = true,
+  stage = "base",
 }: {
   endpoint: string;
   apiKey: string;
   model: string;
   sentence: string;
   systemPrompt: string;
+  useJsonResponseFormat?: boolean;
+  stage?: string;
 }): Promise<Omit<SentenceAnalysisResult, "provider" | "cached">> {
   const body = {
     model,
     temperature: 0.1,
-    max_tokens: 520,
+    max_tokens: 360,
+    ...(useJsonResponseFormat
+      ? {
+          response_format: {
+            type: "json_object",
+          },
+        }
+      : {}),
     messages: [
       {
         role: "system",
@@ -485,11 +694,133 @@ async function requestSentenceAnalysis({
 
   if (!response.ok) {
     const message = readLlmError(payload);
-    throw new Error(message || `LLM analysis request failed: ${response.status}`);
+    throw new SentenceAnalysisRequestError(message || `LLM analysis request failed: ${response.status}`, {
+      status: response.status,
+      responseText: payload?.choices?.[0]?.message?.content ?? JSON.stringify(payload ?? "").slice(0, 1600),
+      stage,
+    });
   }
 
   const content = payload?.choices?.[0]?.message?.content ?? "";
-  return parseSentenceAnalysisResponse(content);
+
+  try {
+    return parseSentenceAnalysisResponse(content);
+  } catch (error) {
+    throw new SentenceAnalysisRequestError(
+      error instanceof Error ? error.message : "Sentence analysis parsing failed.",
+      {
+        status: response.status,
+        responseText: content.slice(0, 1600),
+        stage,
+      },
+    );
+  }
+}
+
+async function requestSentenceAnalysisFrame(args: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  sentence: string;
+  systemPrompt: string;
+  useJsonResponseFormat?: boolean;
+  stage?: string;
+}): Promise<SentenceAnalysisFrame> {
+  const content = await requestSentenceAnalysisContent(args);
+  return parseSentenceAnalysisFrameResponse(content);
+}
+
+async function requestSentenceAnalysisSummaries(args: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  sentence: string;
+  systemPrompt: string;
+  useJsonResponseFormat?: boolean;
+  stage?: string;
+}): Promise<string[]> {
+  const content = await requestSentenceAnalysisContent(args);
+  return parseSentenceAnalysisSummariesResponse(content);
+}
+
+async function requestSentenceAnalysisContent({
+  endpoint,
+  apiKey,
+  model,
+  sentence,
+  systemPrompt,
+  useJsonResponseFormat = true,
+  stage = "base",
+}: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  sentence: string;
+  systemPrompt: string;
+  useJsonResponseFormat?: boolean;
+  stage?: string;
+}): Promise<string> {
+  const body = {
+    model,
+    temperature: 0.1,
+    max_tokens: stage.includes("summary") ? 220 : 260,
+    ...(useJsonResponseFormat
+      ? {
+          response_format: {
+            type: "json_object",
+          },
+        }
+      : {}),
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt,
+      },
+      {
+        role: "user",
+        content: `sentence: ${sentence}`,
+      },
+    ],
+  };
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+        error?: { message?: string };
+      }
+    | null;
+
+  const finishReason = payload?.choices?.[0]?.finish_reason ?? "";
+
+  if (!response.ok) {
+    const message = readLlmError(payload);
+    throw new SentenceAnalysisRequestError(message || `LLM analysis request failed: ${response.status}`, {
+      status: response.status,
+      responseText: payload?.choices?.[0]?.message?.content ?? JSON.stringify(payload ?? "").slice(0, 1600),
+      stage,
+    });
+  }
+
+  const content = payload?.choices?.[0]?.message?.content ?? "";
+
+  if (finishReason === "length") {
+    throw new SentenceAnalysisRequestError("Sentence analysis response was truncated by max tokens.", {
+      status: response.status,
+      responseText: content.slice(0, 1600),
+      stage,
+    });
+  }
+
+  return content;
 }
 
 async function requestSentenceHighlights({
@@ -507,11 +838,14 @@ async function requestSentenceHighlights({
     model,
     temperature: 0,
     max_tokens: 160,
+    response_format: {
+      type: "json_object",
+    },
     messages: [
       {
         role: "system",
         content:
-          'Extract only structural signal words from the English sentence for long-sentence analysis. Return strict JSON only: {"highlights":[{"text":"<exact single word from sentence>","category":"<subject|predicate|nonfinite|conjunction|relative|preposition>"}]}. Choose 3 to 8 exact single-word tokens copied from the sentence. Prefer: finite predicates, relative words like who/which/that when they truly introduce clauses, subordinators like because/if/although/when, the real nonfinite verb after to do, important doing/done forms, coordinators like and/but/or, and occasionally a key preposition such as of/in/with/by/through when it truly helps cut structure. Never output content nouns. Never output possessive determiners or simple pronouns like my, your, his, her, its, our, their, it, they, them, this, these, those. Never output plain "that" when it is only a determiner such as "that data".',
+          'Extract only structural signal words from the English sentence for long-sentence analysis. Return strict JSON only: {"highlights":["<category>|||<exact single word from sentence>"]}. Choose 3 to 8 exact single-word tokens copied from the sentence. Prefer: finite predicates, relative words like who/which/that when they truly introduce clauses, subordinators like because/if/although/when, the real nonfinite verb after to do, important doing/done forms, coordinators like and/but/or, and occasionally a key preposition such as of/in/with/by/through when it truly helps cut structure. Never output content nouns. Never output possessive determiners or simple pronouns like my, your, his, her, its, our, their, it, they, them, this, these, those. Never output plain "that" when it is only a determiner such as "that data". Allowed categories: subject, predicate, nonfinite, conjunction, relative, preposition.',
       },
       {
         role: "user",
@@ -928,87 +1262,156 @@ export async function analyzeSentenceWithLlm({
 
   const endpoint = `${settings.providerBaseUrl.replace(/\/+$/, "")}/chat/completions`;
   const sentence = trimContext(text);
-  const basePrompt =
-    'You are an English sentence analysis tutor for Chinese students. Use a Tian Jing style exam-prep method: first find signal words and punctuation to cut the sentence into layers; then locate the main clause subject and predicate and state the backbone; then explain relative clauses, subordinate clauses, noun clauses, nonfinite structures, appositives, modifier chains, and parallel structures as branches attached to the backbone; finally give a smooth Chinese translation in natural order. The explanation should feel like a teacher walking through a sentence, practical and clear, not vague and not too academic. Return strict JSON only with keys: translation, structure, analysisSteps, highlights, clauseBlocks. translation is full Chinese translation. structure is one short Chinese summary of the sentence backbone. analysisSteps is an array of exactly 4 Chinese steps, roughly 切层次 / 抓主干 / 拆枝叶 / 顺译. In step 3 you MUST explicitly say for every important clause or branch what it modifies, explains, depends on, or serves as the object/complement of. For example: who/which/that clause modifies which noun; that/how/whether clause is the object or content of which verb or noun; nonfinite phrase modifies which part or expresses what function. If there is any coordination or parallel structure, you MUST clearly say exactly which words, phrases, or clauses are parallel to each other and what connector links them, such as A and B are parallel, or A / B / C are coordinated by and, or not A but B. highlights is an array of 3 to 10 exact single-word tokens copied from the original sentence with category from [subject, predicate, nonfinite, conjunction, relative, preposition]. Choose only structural signal words, not content words. Structural signal words include: 1) relative words: who, whom, whose, which, that when they really introduce clauses; 2) subordinators: because, since, as, if, unless, although, though, even though, while, when, before, after, until, where, so that, in order that; 3) nonfinite markers: to do, doing, done, but highlight the real nonfinite verb keyword, not the word to; 4) coordinators and parallel markers: and, or, but, not...but..., not only...but also...; 5) punctuation-triggered logic around commas, semicolons, dashes, and parentheses; 6) sometimes a key preposition in a long modifier chain such as of, in, with, by, through, over, under, when it truly helps cut structure; 7) special clause trigger words such as how, whether, what, why in noun clauses. Never highlight ordinary content nouns. Never highlight possessive determiners or simple pronouns like my, your, his, her, its, our, their, it, they, them, this, these, those. Never highlight that when it is only a determiner such as that data. clauseBlocks is an array of 3 to 8 exact text chunks copied from the original sentence in original order. The clauseBlocks must together cover the whole sentence from first word to last word with no missing words and no overlap. Every major part of the sentence should belong to some clauseBlock. If a chunk is too long, split it at commas, relative words, subordinators, coordinating conjunctions, or nonfinite markers so the visual segmentation stays clear. Each chunk should usually stay within about 3 to 12 words when possible. If a clause or phrase contains a long prepositional branch or a preposition-led noun clause that provides a distinct modifier/complement layer, split that branch into its own clauseBlock. However, do not isolate a bare leading preposition by itself; keep the preposition attached to its object, complement, or clause inside the same clauseBlock. type must be one of [main, relative, subordinate, nonfinite, parallel, modifier]. No markdown or extra text.';
-  const syntaxSafePrompt =
-    `${basePrompt} Output must be valid JSON parsable by JSON.parse. Use a compact single JSON object. Escape all double quotes inside string values. Do not omit commas between array items or object fields.`;
-  const retryPrompt =
-    `${basePrompt} Important quality bar: the highlights must not be empty, and they must include at least one real predicate or nonfinite signal plus at least one connector/relative/preposition signal when available. The clauseBlocks must visually cover the entire sentence. Do not leave any tail text outside the clauseBlocks.`;
-
-  let parsed: Omit<SentenceAnalysisResult, "provider" | "cached">;
+  const framePrompt =
+    'You are an English sentence analysis tutor for Chinese students. First identify the sentence backbone and then cut the sentence into visual chunks. Return strict JSON only with keys: translation, structure, highlights, clauseBlocks. translation is the full Chinese translation in one natural sentence. structure is one short Chinese sentence that states the backbone only. highlights must be an array of 3 to 8 strings in the format "<category>|||<exact single word from sentence>". Allowed categories are [subject, predicate, nonfinite, conjunction, relative, preposition]. Choose only structural signal words, not content words. Never highlight possessive determiners or simple pronouns like my, your, his, her, its, our, their, it, they, them, this, these, those. Never highlight that when it is only a determiner such as that data. clauseBlocks must be an array of 3 to 8 strings in the format "<type>|||<exact original text chunk>". Allowed types are [main, relative, subordinate, nonfinite, parallel, modifier]. The clauseBlocks must together cover the whole sentence from first word to last word with no missing words and no overlap. Every major part of the sentence should belong to some clauseBlock. If a chunk is too long, split it at commas, relative words, subordinators, coordinating conjunctions, or nonfinite markers so the visual segmentation stays clear. Each chunk should usually stay within about 3 to 12 words when possible. If a clause or phrase contains a long prepositional branch or a preposition-led noun clause that provides a distinct modifier/complement layer, split that branch into its own clauseBlock. However, do not isolate a bare leading preposition by itself; keep the preposition attached to its object, complement, or clause inside the same clauseBlock. Example JSON format: {"translation":"中文整句","structure":"主干说明","highlights":["relative|||which"],"clauseBlocks":["relative|||which describes ..."]}.';
+  const frameSafePrompt =
+    `${framePrompt} Output must be valid compact JSON parsable by JSON.parse. Do not include markdown fences. Do not include extra commentary outside the JSON object.`;
+  const summaryPrompt =
+    'You are an English sentence analysis tutor for Chinese students. Return strict JSON only with keys: cutSummary, backboneSummary, branchSummary, translationSummary. Each value must be one short Chinese sentence. cutSummary explains how to cut the sentence into layers by signal words or punctuation. backboneSummary explains the main clause subject, predicate, and backbone. branchSummary explains important branches: what modifies what, what depends on what, what serves as object/complement of what, and if there is any coordination or parallel structure, clearly state exactly which words, phrases, or clauses are parallel and what connector links them. translationSummary explains the final translation order in one short sentence. No markdown, no numbering, no nested lists, no extra keys.';
+  const summarySafePrompt =
+    `${summaryPrompt} Output must be valid compact JSON parsable by JSON.parse. Do not include markdown fences. Do not include extra commentary outside the JSON object.`;
 
   try {
-    parsed = await requestSentenceAnalysis({
-      endpoint,
-      apiKey: settings.apiKey,
-      model: settings.providerModel,
-      sentence,
-      systemPrompt: basePrompt,
-    });
-  } catch {
-    parsed = await requestSentenceAnalysis({
-      endpoint,
-      apiKey: settings.apiKey,
-      model: settings.providerModel,
-      sentence,
-      systemPrompt: syntaxSafePrompt,
-    });
-  }
+    let frame: SentenceAnalysisFrame | null = null;
 
-  if (sentenceAnalysisNeedsRetry(parsed, sentence)) {
     try {
-      parsed = await requestSentenceAnalysis({
+      frame = await requestSentenceAnalysisFrame({
         endpoint,
         apiKey: settings.apiKey,
         model: settings.providerModel,
         sentence,
-        systemPrompt: retryPrompt,
+        systemPrompt: framePrompt,
+        useJsonResponseFormat: true,
+        stage: "frame-json",
       });
     } catch {
-      parsed = await requestSentenceAnalysis({
+      try {
+        frame = await requestSentenceAnalysisFrame({
+          endpoint,
+          apiKey: settings.apiKey,
+          model: settings.providerModel,
+          sentence,
+          systemPrompt: frameSafePrompt,
+          useJsonResponseFormat: true,
+          stage: "frame-safe-json",
+        });
+      } catch {
+        frame = await requestSentenceAnalysisFrame({
+          endpoint,
+          apiKey: settings.apiKey,
+          model: settings.providerModel,
+          sentence,
+          systemPrompt: frameSafePrompt,
+          useJsonResponseFormat: false,
+          stage: "frame-text",
+        });
+      }
+    }
+
+    if (!frame) {
+      throw new SentenceAnalysisFormatError("Sentence analysis frame response was not valid JSON.");
+    }
+
+    if (sentenceHighlightsNeedSupplement(frame.highlights)) {
+      const extraHighlights = await requestSentenceHighlights({
         endpoint,
         apiKey: settings.apiKey,
         model: settings.providerModel,
         sentence,
-        systemPrompt: `${retryPrompt} Also keep the output as strict valid JSON with properly escaped quotes and commas.`,
+      }).catch(() => []);
+
+      if (extraHighlights.length) {
+        const seen = new Set(frame.highlights.map((item) => `${item.text.toLowerCase()}::${item.category}`));
+        frame = {
+          ...frame,
+          highlights: [
+            ...frame.highlights,
+            ...extraHighlights.filter((item) => {
+              const key = `${item.text.toLowerCase()}::${item.category}`;
+
+              if (seen.has(key)) {
+                return false;
+              }
+
+              seen.add(key);
+              return true;
+            }),
+          ],
+        };
+      }
+    }
+
+    let analysisSteps = buildFallbackAnalysisSteps(frame, sentence);
+
+    try {
+      const summarySentence = [
+        `sentence: ${sentence}`,
+        `translation: ${frame.translation}`,
+        `structure: ${frame.structure}`,
+        `highlights: ${frame.highlights.map((item) => `${item.category}:${item.text}`).join(" | ")}`,
+        `clauseBlocks: ${frame.clauseBlocks.map((item) => `${item.type}:${item.text}`).join(" || ")}`,
+      ].join("\n");
+
+      try {
+        analysisSteps = await requestSentenceAnalysisSummaries({
+          endpoint,
+          apiKey: settings.apiKey,
+          model: settings.providerModel,
+          sentence: summarySentence,
+          systemPrompt: summaryPrompt,
+          useJsonResponseFormat: true,
+          stage: "summary-json",
+        });
+      } catch {
+        analysisSteps = await requestSentenceAnalysisSummaries({
+            endpoint,
+            apiKey: settings.apiKey,
+            model: settings.providerModel,
+            sentence: summarySentence,
+            systemPrompt: summarySafePrompt,
+            useJsonResponseFormat: false,
+            stage: "summary-text",
+        });
+      }
+    } catch (error) {
+      logSentenceAnalysisDebug("summary_fallback", {
+        message: error instanceof Error ? error.message : "Unknown summary error.",
+        sentence,
       });
     }
-  }
 
-  if (sentenceHighlightsNeedSupplement(parsed.highlights)) {
-    const extraHighlights = await requestSentenceHighlights({
-      endpoint,
-      apiKey: settings.apiKey,
-      model: settings.providerModel,
-      sentence,
-    }).catch(() => []);
-
-    if (extraHighlights.length) {
-      const seen = new Set(parsed.highlights.map((item) => `${item.text.toLowerCase()}::${item.category}`));
-      parsed = {
-        ...parsed,
-        highlights: [
-          ...parsed.highlights,
-          ...extraHighlights.filter((item) => {
-            const key = `${item.text.toLowerCase()}::${item.category}`;
-
-            if (seen.has(key)) {
-              return false;
-            }
-
-            seen.add(key);
-            return true;
-          }),
-        ],
-      };
+    return {
+      ...frame,
+      analysisSteps,
+      provider: "deepseek-chat",
+      cached: false,
+    };
+  } catch (error) {
+    if (error instanceof SentenceAnalysisRequestError) {
+      logSentenceAnalysisDebug("request_failed", {
+        stage: error.stage,
+        status: error.status,
+        message: error.message,
+        responseText: error.responseText,
+        sentence,
+      });
+    } else if (error instanceof SentenceAnalysisFormatError) {
+      logSentenceAnalysisDebug("format_failed", {
+        message: error.message,
+        sentence,
+      });
     }
-  }
 
-  return {
-    ...parsed,
-    provider: "deepseek-chat",
-    cached: false,
-  };
+    if (error instanceof SentenceAnalysisFormatError) {
+      throw new Error("长难句分析返回格式不稳定，请重试一次。");
+    }
+
+    if (error instanceof SentenceAnalysisRequestError) {
+      throw new Error("长难句分析返回格式不稳定，请重试一次。");
+    }
+
+    throw error;
+  }
 }
 
 export async function translateWithGoogle({

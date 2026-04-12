@@ -95,6 +95,68 @@ describe("sentence analysis parsing", () => {
     });
   });
 
+  test("reads structured analysis payload from fixed summary fields", () => {
+    expect(
+      parseSentenceAnalysisResponse(
+        '{"translation":"这为我们提供了同样的混合精度优势。","structure":"主干是 This gives us the benefit。","cutSummary":"先根据 but 和 over 这类结构信号切出主句与补充说明。","backboneSummary":"主句主干是 This gives us the same mixed-precision benefit。","branchSummary":"as autocast 修饰 benefit；but 引出补充部分；over what runs in which precision 说明 control 的具体内容。","translationSummary":"顺着中文表达先译主干，再补足比较和控制范围。","highlights":[{"text":"gives","category":"predicate"},{"text":"but","category":"conjunction"},{"text":"over","category":"preposition"}],"clauseBlocks":[{"text":"This gives us the same mixed-precision benefit","type":"main"},{"text":"as autocast","type":"modifier"},{"text":"but with full explicit control over what runs in which precision.","type":"parallel"}]}',
+      ),
+    ).toEqual({
+      translation: "这为我们提供了同样的混合精度优势。",
+      structure: "主干是 This gives us the benefit。",
+      analysisSteps: [
+        "先根据 but 和 over 这类结构信号切出主句与补充说明。",
+        "主句主干是 This gives us the same mixed-precision benefit。",
+        "as autocast 修饰 benefit；but 引出补充部分；over what runs in which precision 说明 control 的具体内容。",
+        "顺着中文表达先译主干，再补足比较和控制范围。",
+      ],
+      highlights: [
+        { text: "gives", category: "predicate" },
+        { text: "but", category: "conjunction" },
+        { text: "over", category: "preposition" },
+      ],
+      clauseBlocks: [
+        { text: "This gives us the same mixed-precision benefit", type: "main", label: undefined },
+        { text: "as autocast", type: "modifier", label: undefined },
+        {
+          text: "but with full explicit control over what runs in which precision.",
+          type: "parallel",
+          label: undefined,
+        },
+      ],
+    });
+  });
+
+  test("reads structured analysis payload from stable string arrays", () => {
+    expect(
+      parseSentenceAnalysisResponse(
+        '{"translation":"这为我们提供了同样的混合精度优势。","structure":"主干是 This gives us the benefit。","cutSummary":"先根据 but 和 over 这类结构信号切出主句与补充说明。","backboneSummary":"主句主干是 This gives us the same mixed-precision benefit。","branchSummary":"as autocast 修饰 benefit；but 引出补充部分；over what runs in which precision 说明 control 的具体内容。","translationSummary":"顺着中文表达先译主干，再补足比较和控制范围。","highlights":["predicate|||gives","conjunction|||but","preposition|||over"],"clauseBlocks":["main|||This gives us the same mixed-precision benefit","modifier|||as autocast","parallel|||but with full explicit control over what runs in which precision."]}',
+      ),
+    ).toEqual({
+      translation: "这为我们提供了同样的混合精度优势。",
+      structure: "主干是 This gives us the benefit。",
+      analysisSteps: [
+        "先根据 but 和 over 这类结构信号切出主句与补充说明。",
+        "主句主干是 This gives us the same mixed-precision benefit。",
+        "as autocast 修饰 benefit；but 引出补充部分；over what runs in which precision 说明 control 的具体内容。",
+        "顺着中文表达先译主干，再补足比较和控制范围。",
+      ],
+      highlights: [
+        { text: "gives", category: "predicate" },
+        { text: "but", category: "conjunction" },
+        { text: "over", category: "preposition" },
+      ],
+      clauseBlocks: [
+        { text: "This gives us the same mixed-precision benefit", type: "main", label: undefined },
+        { text: "as autocast", type: "modifier", label: undefined },
+        {
+          text: "but with full explicit control over what runs in which precision.",
+          type: "parallel",
+          label: undefined,
+        },
+      ],
+    });
+  });
+
   test("drops plain prepositions from analysis highlights", () => {
     expect(
       parseSentenceAnalysisResponse(
