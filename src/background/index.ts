@@ -26,6 +26,7 @@ import {
 import {
   removeWordIgnored,
   resolveWordFlags,
+  estimateLearnerLevel,
   setWordIgnored,
   setWordMastered,
   setWordUnmastered,
@@ -35,6 +36,7 @@ import {
   getCachedSelectionTranslation,
   getCachedTranslation,
   getCachedPronunciation,
+  getCachedEnglishExplanation,
   getSettings,
   getTranslatorSettings,
   saveSettings,
@@ -42,15 +44,19 @@ import {
   setCachedSelectionTranslation,
   setCachedTranslation,
   setCachedPronunciation,
+  setCachedEnglishExplanation,
 } from "../shared/storage";
 import {
   analyzeSentenceWithLlm,
+  explainWordInEnglishWithLlm,
   isTranslatorFallbackError,
+  translateSelectionWithLlm,
   translateWithGoogle,
   translateWithLlm,
 } from "../shared/translator";
 import type {
   CacheEntry,
+  EnglishExplanationResult,
   LexiconLookupResult,
   PronunciationAccent,
   PronunciationResult,
@@ -60,17 +66,20 @@ import type {
 
 const inFlightTranslations = new Map<string, Promise<TranslationResult>>();
 const inFlightPronunciations = new Map<string, Promise<PronunciationResult>>();
+const inFlightEnglishExplanations = new Map<string, Promise<EnglishExplanationResult>>();
 
 async function translateByChoice({
   provider,
   lemma,
   surface,
   contextText,
+  responseMode,
 }: {
   provider: TranslationProviderChoice;
   lemma: string;
   surface: string;
   contextText: string;
+  responseMode?: "word" | "sentence";
 }): Promise<TranslationResult> {
   if (provider === "google") {
     return translateWithGoogle({ lemma, surface });
@@ -83,6 +92,7 @@ async function translateByChoice({
       surface,
       contextText,
       settings: translatorSettings,
+      responseMode: responseMode ?? "word",
     });
   } catch (error) {
     if (!translatorSettings.fallbackToGoogle || !isTranslatorFallbackError(error)) {
@@ -98,14 +108,17 @@ async function getOrTranslate(
   surface: string,
   contextText: string,
   provider: TranslationProviderChoice,
+  responseMode: "word" | "sentence",
 ): Promise<CacheEntry | TranslationResult> {
-  const requestKey = `${provider}::${lemma}::${contextText}`;
-  const cached = await getCachedTranslation(lemma, contextText, provider);
+  const cacheProviderKey = `${provider}:${responseMode}`;
+  const requestKey = `${cacheProviderKey}::${lemma}::${contextText}`;
+  const cached = await getCachedTranslation(lemma, contextText, cacheProviderKey);
 
   if (cached?.translation) {
     return {
       translation: cached.translation,
       sentenceTranslation: cached.sentenceTranslation,
+      englishExplanation: cached.englishExplanation,
       provider: cached.provider,
       cached: true,
     };
@@ -114,15 +127,16 @@ async function getOrTranslate(
   let pending = inFlightTranslations.get(requestKey);
 
   if (!pending) {
-    pending = translateByChoice({ provider, lemma, surface, contextText });
+    pending = translateByChoice({ provider, lemma, surface, contextText, responseMode });
     inFlightTranslations.set(requestKey, pending);
   }
 
   try {
     const result = await pending;
-    await setCachedTranslation(lemma, contextText, provider, {
+    await setCachedTranslation(lemma, contextText, cacheProviderKey, {
       translation: result.translation,
       sentenceTranslation: result.sentenceTranslation,
+      englishExplanation: result.englishExplanation,
       provider: result.provider,
       updatedAt: Date.now(),
     });
@@ -137,13 +151,15 @@ async function getOrTranslateSelection(
   contextText: string,
   provider: TranslationProviderChoice,
 ): Promise<CacheEntry | TranslationResult> {
-  const requestKey = `selection::${provider}::${text}::${contextText}`;
-  const cached = await getCachedSelectionTranslation(text, contextText, provider);
+  const cacheProviderKey = `${provider}:selection-v2`;
+  const requestKey = `selection::${cacheProviderKey}::${text}::${contextText}`;
+  const cached = await getCachedSelectionTranslation(text, contextText, cacheProviderKey);
 
   if (cached?.translation) {
     return {
       translation: cached.translation,
       sentenceTranslation: cached.sentenceTranslation,
+      englishExplanation: cached.englishExplanation,
       provider: cached.provider,
       cached: true,
     };
@@ -152,20 +168,36 @@ async function getOrTranslateSelection(
   let pending = inFlightTranslations.get(requestKey);
 
   if (!pending) {
-    pending = translateByChoice({
-      provider,
-      lemma: text,
-      surface: text,
-      contextText,
-    });
+    pending = (async () => {
+      if (provider === "google") {
+        return translateWithGoogle({ lemma: text, surface: text });
+      }
+
+      const translatorSettings = await getTranslatorSettings();
+
+      try {
+        return await translateSelectionWithLlm({
+          text,
+          contextText,
+          settings: translatorSettings,
+        });
+      } catch (error) {
+        if (!translatorSettings.fallbackToGoogle || !isTranslatorFallbackError(error)) {
+          throw error;
+        }
+
+        return translateWithGoogle({ lemma: text, surface: text });
+      }
+    })();
     inFlightTranslations.set(requestKey, pending);
   }
 
   try {
     const result = await pending;
-    await setCachedSelectionTranslation(text, contextText, provider, {
+    await setCachedSelectionTranslation(text, contextText, cacheProviderKey, {
       translation: result.translation,
       sentenceTranslation: result.sentenceTranslation,
+      englishExplanation: result.englishExplanation,
       provider: result.provider,
       updatedAt: Date.now(),
     });
@@ -228,7 +260,10 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
   }
 
   try {
-    const translation = await getOrTranslate(lemma, surface, contextText, provider);
+    const translatorSettings = provider === "llm" ? await getTranslatorSettings() : null;
+    const englishMode = provider === "llm" && translatorSettings?.llmDisplayMode === "english";
+    const translationMode =
+      provider === "llm" && translatorSettings?.llmDisplayMode === "sentence" ? "sentence" : "word";
 
     return {
       lemma,
@@ -239,10 +274,33 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
       isKnown: false,
       shouldTranslate: true,
       reason: "translate",
-      translation: translation.translation,
-      sentenceTranslation: translation.sentenceTranslation,
-      translationProvider: translation.provider,
-      cached: translation.cached,
+      ...(englishMode
+        ? await (async () => {
+            const explanation = await getOrExplainWordInEnglish(lemma, surface, contextText);
+            return {
+              translation: explanation.meaning,
+              sentenceTranslation: undefined,
+              englishExplanation: explanation.explanation,
+              translationProvider: explanation.provider,
+              cached: explanation.cached,
+            };
+          })()
+        : await (async () => {
+            const translation = await getOrTranslate(
+              lemma,
+              surface,
+              contextText,
+              provider,
+              translationMode,
+            );
+            return {
+              translation: translation.translation,
+              sentenceTranslation: translation.sentenceTranslation,
+              englishExplanation: translation.englishExplanation,
+              translationProvider: translation.provider,
+              cached: translation.cached,
+            };
+          })()),
     };
   } catch {
     return {
@@ -256,9 +314,59 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
       reason: "translate",
       translation: "暂不可用",
       sentenceTranslation: undefined,
+      englishExplanation: undefined,
       translationProvider: provider === "llm" ? "deepseek-chat" : "google-web",
       cached: false,
     };
+  }
+}
+
+async function getOrExplainWordInEnglish(
+  lemma: string,
+  surface: string,
+  contextText: string,
+): Promise<EnglishExplanationResult> {
+  const userSettings = await getSettings();
+  const learnerLevel = estimateLearnerLevel(userSettings);
+  const requestKey = `explain::${learnerLevel}::${lemma}::${contextText}`;
+  const cached = await getCachedEnglishExplanation(lemma, contextText, learnerLevel);
+
+  if (cached?.meaning && cached?.explanation) {
+    return {
+      meaning: cached.meaning,
+      explanation: cached.explanation,
+      provider: cached.provider,
+      cached: true,
+    };
+  }
+
+  let pending = inFlightEnglishExplanations.get(requestKey);
+
+  if (!pending) {
+    pending = (async () => {
+      const translatorSettings = await getTranslatorSettings();
+
+      return explainWordInEnglishWithLlm({
+        surface,
+        contextText,
+        settings: translatorSettings,
+        userSettings,
+      });
+    })();
+    inFlightEnglishExplanations.set(requestKey, pending);
+  }
+
+  try {
+    const result = await pending;
+    await setCachedEnglishExplanation(lemma, contextText, learnerLevel, {
+      meaning: result.meaning,
+      explanation: result.explanation,
+      provider: result.provider,
+      updatedAt: Date.now(),
+    });
+    return result;
+  } finally {
+    inFlightEnglishExplanations.delete(requestKey);
   }
 }
 
@@ -267,11 +375,12 @@ async function handleAnalyzeSelection(
 ): Promise<SentenceAnalysisResult> {
   const text = message.payload.text.trim();
   const translatorSettings = await getTranslatorSettings();
-
-  return analyzeSentenceWithLlm({
+  const result = await analyzeSentenceWithLlm({
     text,
     settings: translatorSettings,
   });
+
+  return result;
 }
 
 async function handleTranslateSelection(
@@ -378,6 +487,7 @@ async function getOrLookupPronunciation(surface: string): Promise<PronunciationR
     inFlightPronunciations.delete(normalized);
   }
 }
+
 
 async function handleLookupPronunciation(
   message: LookupPronunciationMessage,

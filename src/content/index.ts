@@ -48,8 +48,34 @@ const TOOLTIP_STYLE = `
     backdrop-filter: blur(12px);
     pointer-events: auto;
   }
+  .wordwise-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.08);
+    color: #475569;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .wordwise-close[data-visible="true"] {
+    display: inline-flex;
+  }
+  .wordwise-close:hover {
+    background: rgba(15, 23, 42, 0.14);
+    color: #1f2937;
+  }
   .wordwise-card[data-mode="analysis"] {
-    max-width: 520px;
+    max-width: 580px;
+    max-height: min(72vh, 780px);
+    overflow-y: auto;
   }
   .wordwise-word-view[data-visible="false"],
   .wordwise-analysis-view[data-visible="false"] {
@@ -150,6 +176,26 @@ const TOOLTIP_STYLE = `
   }
   .wordwise-secondary-translation[data-visible="true"] {
     display: block;
+  }
+  .wordwise-english-explanation {
+    display: none;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed rgba(100, 116, 139, 0.28);
+  }
+  .wordwise-english-explanation[data-visible="true"] {
+    display: block;
+  }
+  .wordwise-english-explanation-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    margin-bottom: 4px;
+  }
+  .wordwise-english-explanation-text {
+    font-size: 13px;
+    line-height: 1.65;
+    color: #334155;
   }
   .wordwise-hint {
     font-size: 13px;
@@ -273,11 +319,129 @@ const TOOLTIP_STYLE = `
   }
   .wordwise-analysis-source,
   .wordwise-analysis-translation,
-  .wordwise-analysis-structure {
+  .wordwise-analysis-structure,
+  .wordwise-analysis-vocabulary,
+  .wordwise-analysis-summary,
+  .wordwise-analysis-grammar {
     font-size: 14px;
     line-height: 1.7;
     color: #1f2937;
     font-family: inherit;
+  }
+  .wordwise-analysis-source {
+    line-height: 2.08;
+  }
+  .wordwise-analysis-vocabulary-list,
+  .wordwise-analysis-summary-list,
+  .wordwise-analysis-grammar-list,
+  .wordwise-analysis-clause-list {
+    display: grid;
+    gap: 10px;
+  }
+  .wordwise-analysis-vocab-item,
+  .wordwise-analysis-summary-item,
+  .wordwise-analysis-grammar-item,
+  .wordwise-analysis-clause-item {
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+  }
+  .wordwise-analysis-vocab-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .wordwise-analysis-vocab-check {
+    color: #16a34a;
+    font-weight: 700;
+    line-height: 1.4;
+    flex: 0 0 auto;
+  }
+  .wordwise-analysis-vocab-body {
+    min-width: 0;
+    line-height: 1.7;
+  }
+  .wordwise-analysis-vocab-head {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+  .wordwise-analysis-vocab-text {
+    font-size: 15px;
+    font-weight: 700;
+    color: #172033;
+  }
+  .wordwise-analysis-vocab-phonetic {
+    color: #7c6f45;
+    font-weight: 600;
+  }
+  .wordwise-analysis-vocab-meaning {
+    color: #334155;
+  }
+  .wordwise-analysis-vocab-pos {
+    color: #64748b;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .wordwise-analysis-summary-key,
+  .wordwise-analysis-grammar-title,
+  .wordwise-analysis-clause-title {
+    font-weight: 700;
+    color: #134e4a;
+    margin-bottom: 4px;
+  }
+  .wordwise-analysis-summary-value,
+  .wordwise-analysis-grammar-text,
+  .wordwise-analysis-clause-text,
+  .wordwise-analysis-clause-note {
+    color: #1f2937;
+    line-height: 1.75;
+  }
+  .wordwise-analysis-board {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+  }
+  .wordwise-analysis-board-title,
+  .wordwise-analysis-subtitle {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #6b7280;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .wordwise-analysis-board-text,
+  .wordwise-analysis-simplified {
+    font-size: 14px;
+    line-height: 1.8;
+    color: #1f2937;
+  }
+  .wordwise-analysis-simplified-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-left: 3px solid rgba(16, 185, 129, 0.55);
+    background: rgba(16, 185, 129, 0.08);
+    border-radius: 10px;
+  }
+  .wordwise-analysis-clause-note {
+    margin-top: 4px;
+    color: #475569;
+  }
+  .wordwise-analysis-grammar-examples {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    color: #334155;
+  }
+  .wordwise-analysis-grammar-examples li {
+    margin-bottom: 6px;
+  }
+  .wordwise-analysis-empty {
+    color: #64748b;
   }
   .wordwise-analysis-steps {
     margin: 0;
@@ -298,6 +462,59 @@ const TOOLTIP_STYLE = `
     gap: 8px;
     flex-wrap: wrap;
     margin-top: 8px;
+  }
+  .wordwise-clause-block {
+    display: inline-block;
+    vertical-align: baseline;
+    padding: 1px 5px 2px;
+    border: 1.5px solid transparent;
+    border-radius: 999px;
+    margin: 1px 4px 3px 0;
+    white-space: normal;
+    line-height: 1.45;
+    color: #1f2a44;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  .wordwise-clause-block--tone-0 {
+    background: #f8d2e7;
+    border-color: #eba5ca;
+  }
+  .wordwise-clause-block--tone-1 {
+    background: #d7f2cf;
+    border-color: #98d38f;
+  }
+  .wordwise-clause-block--tone-2 {
+    background: #f8efb6;
+    border-color: #e2d36a;
+  }
+  .wordwise-clause-block .wordwise-mark {
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+    color: inherit;
+    font-weight: 800;
+    box-shadow: inset 0 -0.22em 0 rgba(59, 130, 246, 0.28);
+  }
+  .wordwise-clause-block .wordwise-mark--subject {
+    box-shadow: inset 0 -0.22em 0 rgba(59, 130, 246, 0.28);
+  }
+  .wordwise-clause-block .wordwise-mark--predicate {
+    box-shadow: inset 0 -0.22em 0 rgba(249, 115, 22, 0.34);
+  }
+  .wordwise-clause-block .wordwise-mark--nonfinite {
+    box-shadow: inset 0 -0.22em 0 rgba(168, 85, 247, 0.34);
+    font-weight: 900;
+  }
+  .wordwise-clause-block .wordwise-mark--conjunction {
+    box-shadow: inset 0 -0.22em 0 rgba(16, 185, 129, 0.32);
+  }
+  .wordwise-clause-block .wordwise-mark--relative {
+    box-shadow: inset 0 -0.22em 0 rgba(236, 72, 153, 0.32);
+  }
+  .wordwise-clause-block .wordwise-mark--preposition {
+    box-shadow: inset 0 -0.22em 0 rgba(14, 165, 233, 0.3);
+    font-weight: 700;
   }
   .wordwise-analysis-pill {
     display: inline-flex;
@@ -324,8 +541,9 @@ const TOOLTIP_STYLE = `
   }
   .wordwise-mark--nonfinite,
   .wordwise-pill--nonfinite {
-    background: rgba(168, 85, 247, 0.16);
-    color: #7c3aed;
+    background: rgba(168, 85, 247, 0.22);
+    color: #6d28d9;
+    box-shadow: inset 0 -1px 0 rgba(109, 40, 217, 0.16);
   }
   .wordwise-mark--conjunction,
   .wordwise-pill--conjunction {
@@ -339,8 +557,8 @@ const TOOLTIP_STYLE = `
   }
   .wordwise-mark--preposition,
   .wordwise-pill--preposition {
-    background: rgba(245, 158, 11, 0.18);
-    color: #b45309;
+    background: rgba(14, 165, 233, 0.16);
+    color: #0369a1;
   }
   @keyframes wordwise-fade {
     0%, 100% { opacity: 0.35; }
@@ -549,117 +767,169 @@ const CONNECTOR_WORDS = new Set([
 const RELATIVE_WORDS = new Set([
   "that", "which", "who", "whom", "whose", "where", "when", "why",
 ]);
-const PREPOSITION_WORDS = new Set([
-  "in", "on", "at", "for", "with", "by", "to", "from", "of", "about", "over",
-  "under", "after", "before", "during", "through", "between", "against", "into",
-  "without", "within", "across",
-]);
-const PREDICATE_HINT_WORDS = new Set([
-  "is", "are", "was", "were", "be", "been", "being", "am",
-  "has", "have", "had", "do", "does", "did",
-  "can", "could", "may", "might", "must", "shall", "should", "will", "would",
-  "need", "needs", "needed", "show", "shows", "showed", "shown",
-  "suggest", "suggests", "suggested", "mean", "means", "meant",
-  "indicate", "indicates", "indicated", "argue", "argues", "argued",
-  "say", "says", "said", "make", "makes", "made", "find", "finds", "found",
-  "become", "becomes", "became", "remain", "remains", "remained",
+const POSSESSIVE_DETERMINER_WORDS = new Set([
+  "my", "your", "his", "her", "its", "our", "their",
 ]);
 
-function looksLikeFinitePredicate(word: string): boolean {
-  if (PREDICATE_HINT_WORDS.has(word)) {
-    return true;
-  }
-
-  if (word.endsWith("ed") || word.endsWith("es")) {
-    return true;
-  }
-
-  return word.endsWith("s") && word.length > 3 && !word.endsWith("ss");
+interface SentenceWordToken {
+  index: number;
+  text: string;
+  normalized: string;
+  start: number;
+  end: number;
 }
 
-function buildHighlightCategoryMap(
+interface MatchedSentenceClauseBlock extends SentenceClauseBlock {
+  start: number;
+  end: number;
+}
+
+function tokenizeSentenceWords(sentence: string): SentenceWordToken[] {
+  const tokens: SentenceWordToken[] = [];
+  const regex = /[A-Za-z]+(?:'[A-Za-z]+)?/g;
+  let match: RegExpExecArray | null = regex.exec(sentence);
+  let index = 0;
+
+  while (match) {
+    const text = match[0];
+    const start = match.index;
+    tokens.push({
+      index,
+      text,
+      normalized: normalizeHighlightWord(text),
+      start,
+      end: start + text.length,
+    });
+    index += 1;
+    match = regex.exec(sentence);
+  }
+
+  return tokens;
+}
+
+function matchClauseBlocks(
+  sentence: string,
+  blocks: SentenceClauseBlock[],
+): MatchedSentenceClauseBlock[] {
+  const matchedBlocks: MatchedSentenceClauseBlock[] = [];
+  let cursor = 0;
+
+  for (const block of blocks) {
+    const text = block.text.trim();
+
+    if (!text) {
+      continue;
+    }
+
+    const start = sentence.indexOf(text, cursor);
+
+    if (start < 0) {
+      continue;
+    }
+
+    matchedBlocks.push({
+      ...block,
+      start,
+      end: start + text.length,
+    });
+    cursor = start + text.length;
+  }
+
+  return matchedBlocks;
+}
+
+function assignFirstMatchingToken(
+  tokens: SentenceWordToken[],
+  assignments: Map<number, keyof typeof HIGHLIGHT_CATEGORY_META>,
+  predicate: (token: SentenceWordToken) => boolean,
+  category: keyof typeof HIGHLIGHT_CATEGORY_META,
+): boolean {
+  for (const token of tokens) {
+    if (!assignments.has(token.index) && predicate(token)) {
+      assignments.set(token.index, category);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function buildHighlightAssignments(
   result: SentenceAnalysisResult,
-  sentence?: string,
-): Map<string, keyof typeof HIGHLIGHT_CATEGORY_META> {
-  const highlightMap = new Map(
-    result.highlights.map((item) => [normalizeHighlightWord(item.text), item.category]),
-  );
+  sentence: string,
+): Map<number, keyof typeof HIGHLIGHT_CATEGORY_META> {
+  const tokens = tokenizeSentenceWords(sentence);
+  const assignments = new Map<number, keyof typeof HIGHLIGHT_CATEGORY_META>();
 
-  for (const word of CONNECTOR_WORDS) {
-    if (!highlightMap.has(word)) {
-      highlightMap.set(word, "conjunction");
+  for (const item of result.highlights) {
+    const normalized = normalizeHighlightWord(item.text);
+
+    if (
+      !normalized ||
+      POSSESSIVE_DETERMINER_WORDS.has(normalized) ||
+      (normalized === "that" && item.category !== "relative" && item.category !== "conjunction")
+    ) {
+      continue;
     }
+
+    assignFirstMatchingToken(
+      tokens,
+      assignments,
+        (token) => token.normalized === normalized,
+      item.category,
+    );
   }
 
-  for (const word of RELATIVE_WORDS) {
-    if (!highlightMap.has(word)) {
-      highlightMap.set(word, "relative");
-    }
-  }
-
-  for (const word of PREPOSITION_WORDS) {
-    if (!highlightMap.has(word)) {
-      highlightMap.set(word, "preposition");
-    }
-  }
-
-  if (sentence) {
-    const tokens = sentence.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? [];
-    let predicateCount = [...highlightMap.values()].filter((value) => value === "predicate").length;
-
-    for (const token of tokens) {
-      const normalized = normalizeHighlightWord(token);
-
-      if (
-        !normalized ||
-        CONNECTOR_WORDS.has(normalized) ||
-        RELATIVE_WORDS.has(normalized) ||
-        PREPOSITION_WORDS.has(normalized)
-      ) {
-        continue;
-      }
-
-      if (looksLikeFinitePredicate(normalized)) {
-        highlightMap.set(normalized, "predicate");
-        predicateCount += 1;
-      }
-
-      if (predicateCount >= 2) {
-        break;
-      }
-    }
-  }
-
-  return highlightMap;
+  return assignments;
 }
 
 function renderSentenceMarkup(result: SentenceAnalysisResult, sentence: string): string {
-  const highlightMap = buildHighlightCategoryMap(result, sentence);
-  const tokens = sentence.match(/[A-Za-z]+(?:'[A-Za-z]+)?|[^A-Za-z]+/g) ?? [sentence];
+  const tokens = tokenizeSentenceWords(sentence);
+  const assignments = buildHighlightAssignments(result, sentence);
+  return renderTextRangeWithAssignments(sentence, 0, sentence.length, tokens, assignments);
+}
 
-  return tokens
-    .map((token) => {
-      const normalized = normalizeHighlightWord(token);
-      const category = normalized ? highlightMap.get(normalized) : null;
+function renderTextRangeWithAssignments(
+  sentence: string,
+  start: number,
+  end: number,
+  tokens: SentenceWordToken[],
+  assignments: Map<number, keyof typeof HIGHLIGHT_CATEGORY_META>,
+): string {
+  let cursor = start;
+  let markup = "";
 
-      if (!category) {
-        return escapeHtml(token);
-      }
+  for (const token of tokens) {
+    if (token.end <= start || token.start >= end) {
+      continue;
+    }
 
-      return `<span class="wordwise-mark ${HIGHLIGHT_CATEGORY_META[category].className}">${escapeHtml(token)}</span>`;
-    })
-    .join("");
+    if (token.start > cursor) {
+      markup += escapeHtml(sentence.slice(cursor, token.start));
+    }
+
+    const category = assignments.get(token.index);
+
+    if (!category) {
+      markup += escapeHtml(sentence.slice(token.start, token.end));
+    } else {
+      markup += `<span class="wordwise-mark ${HIGHLIGHT_CATEGORY_META[category].className}">${escapeHtml(sentence.slice(token.start, token.end))}</span>`;
+    }
+
+    cursor = token.end;
+  }
+
+  if (cursor < end) {
+    markup += escapeHtml(sentence.slice(cursor, end));
+  }
+
+  return markup;
 }
 
 function renderLegendMarkup(result: SentenceAnalysisResult, sentence: string): string {
-  const highlightMap = buildHighlightCategoryMap(result, sentence);
-  const tokens = sentence.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? [];
+  const assignments = buildHighlightAssignments(result, sentence);
   const categories = [
-    ...new Set(
-      tokens
-        .map((token) => highlightMap.get(normalizeHighlightWord(token)))
-        .filter((category): category is keyof typeof HIGHLIGHT_CATEGORY_META => Boolean(category)),
-    ),
+    ...new Set([...assignments.values()]),
   ];
 
   if (!categories.length) {
@@ -672,6 +942,83 @@ function renderLegendMarkup(result: SentenceAnalysisResult, sentence: string): s
       return `<span class="wordwise-analysis-pill ${meta.pillClassName}">${meta.label}</span>`;
     })
     .join("");
+}
+
+const CLAUSE_BLOCK_TONE_CLASSES = [
+  "wordwise-clause-block--tone-0",
+  "wordwise-clause-block--tone-1",
+  "wordwise-clause-block--tone-2",
+] as const;
+
+function renderSentenceWithClauseBlocks(
+  result: SentenceAnalysisResult,
+  sentence: string,
+): string {
+  if (!result.clauseBlocks.length) {
+    return renderSentenceMarkup(result, sentence);
+  }
+
+  const tokens = tokenizeSentenceWords(sentence);
+  const assignments = buildHighlightAssignments(result, sentence);
+  const displayBlocks = matchClauseBlocks(sentence, result.clauseBlocks);
+
+  let cursor = 0;
+  let matchedCount = 0;
+  let markup = "";
+
+  for (const block of displayBlocks) {
+    if (block.start > cursor) {
+      const gapText = sentence.slice(cursor, block.start);
+
+      if (/[A-Za-z]/.test(gapText)) {
+        const gapClassName = CLAUSE_BLOCK_TONE_CLASSES[matchedCount % CLAUSE_BLOCK_TONE_CLASSES.length];
+        markup += `<span class="wordwise-clause-block ${gapClassName}">${renderTextRangeWithAssignments(
+          sentence,
+          cursor,
+          block.start,
+          tokens,
+          assignments,
+        )}</span>`;
+        matchedCount += 1;
+      } else {
+        markup += renderTextRangeWithAssignments(sentence, cursor, block.start, tokens, assignments);
+      }
+    }
+
+    const className = CLAUSE_BLOCK_TONE_CLASSES[matchedCount % CLAUSE_BLOCK_TONE_CLASSES.length];
+    markup += `<span class="wordwise-clause-block ${className}">${renderTextRangeWithAssignments(
+      sentence,
+      block.start,
+      block.end,
+      tokens,
+      assignments,
+    )}</span>`;
+    cursor = block.end;
+    matchedCount += 1;
+  }
+
+  if (!matchedCount) {
+    return renderSentenceMarkup(result, sentence);
+  }
+
+  if (cursor < sentence.length) {
+    const tailText = sentence.slice(cursor);
+
+    if (/[A-Za-z]/.test(tailText)) {
+      const tailClassName = CLAUSE_BLOCK_TONE_CLASSES[matchedCount % CLAUSE_BLOCK_TONE_CLASSES.length];
+      markup += `<span class="wordwise-clause-block ${tailClassName}">${renderTextRangeWithAssignments(
+        sentence,
+        cursor,
+        sentence.length,
+        tokens,
+        assignments,
+      )}</span>`;
+    } else {
+      markup += renderTextRangeWithAssignments(sentence, cursor, sentence.length, tokens, assignments);
+    }
+  }
+
+  return markup;
 }
 
 function createTooltipRoot() {
@@ -687,6 +1034,13 @@ function createTooltipRoot() {
   style.textContent = TOOLTIP_STYLE;
   const card = document.createElement("div");
   card.className = "wordwise-card";
+
+  const closeButton = document.createElement("button");
+  closeButton.className = "wordwise-close";
+  closeButton.type = "button";
+  closeButton.dataset.visible = "false";
+  closeButton.setAttribute("aria-label", "关闭");
+  closeButton.textContent = "×";
 
   const surfaceEl = document.createElement("div");
   surfaceEl.className = "wordwise-surface";
@@ -774,6 +1128,16 @@ function createTooltipRoot() {
   secondaryTranslationEl.className = "wordwise-secondary-translation";
   secondaryTranslationEl.dataset.visible = "false";
 
+  const englishExplanationEl = document.createElement("div");
+  englishExplanationEl.className = "wordwise-english-explanation";
+  englishExplanationEl.dataset.visible = "false";
+  const englishExplanationLabelEl = document.createElement("div");
+  englishExplanationLabelEl.className = "wordwise-english-explanation-label";
+  englishExplanationLabelEl.textContent = "英英解释";
+  const englishExplanationTextEl = document.createElement("div");
+  englishExplanationTextEl.className = "wordwise-english-explanation-text";
+  englishExplanationEl.append(englishExplanationLabelEl, englishExplanationTextEl);
+
   const wordView = document.createElement("div");
   wordView.className = "wordwise-word-view";
   wordView.dataset.visible = "true";
@@ -821,15 +1185,6 @@ function createTooltipRoot() {
   analysisLegendEl.className = "wordwise-analysis-legend";
   analysisSourceSection.append(analysisSourceLabel, analysisSourceEl, analysisLegendEl);
 
-  const analysisTranslationSection = document.createElement("section");
-  analysisTranslationSection.className = "wordwise-analysis-section";
-  const analysisTranslationLabel = document.createElement("div");
-  analysisTranslationLabel.className = "wordwise-analysis-label";
-  analysisTranslationLabel.textContent = "整句翻译";
-  const analysisTranslationEl = document.createElement("div");
-  analysisTranslationEl.className = "wordwise-analysis-translation";
-  analysisTranslationSection.append(analysisTranslationLabel, analysisTranslationEl);
-
   const analysisStructureSection = document.createElement("section");
   analysisStructureSection.className = "wordwise-analysis-section";
   const analysisStructureLabel = document.createElement("div");
@@ -848,7 +1203,16 @@ function createTooltipRoot() {
   analysisStepsEl.className = "wordwise-analysis-steps";
   analysisStepsSection.append(analysisStepsLabel, analysisStepsEl);
 
-  translationEl.append(primaryTranslationEl, secondaryTranslationEl);
+  const analysisTranslationSection = document.createElement("section");
+  analysisTranslationSection.className = "wordwise-analysis-section";
+  const analysisTranslationLabel = document.createElement("div");
+  analysisTranslationLabel.className = "wordwise-analysis-label";
+  analysisTranslationLabel.textContent = "翻译";
+  const analysisTranslationEl = document.createElement("div");
+  analysisTranslationEl.className = "wordwise-analysis-translation";
+  analysisTranslationSection.append(analysisTranslationLabel, analysisTranslationEl);
+
+  translationEl.append(primaryTranslationEl, secondaryTranslationEl, englishExplanationEl);
   actionsEl.append(llmButton, selectionAnalysisButton, ignoreButton, button);
   metaEl.append(rankEl);
   wordView.append(surfaceEl, pronunciationEl, hintEl, translationEl, actionsEl, metaEl);
@@ -862,13 +1226,14 @@ function createTooltipRoot() {
     analysisStructureSection,
     analysisStepsSection,
   );
-  card.append(wordView, analysisView);
+  card.append(closeButton, wordView, analysisView);
   shadow.append(style, card);
   document.documentElement.append(host);
 
   return {
     host,
     card,
+    closeButton,
     wordView,
     analysisView,
     surfaceEl,
@@ -879,6 +1244,8 @@ function createTooltipRoot() {
     translationEl,
     primaryTranslationEl,
     secondaryTranslationEl,
+    englishExplanationEl,
+    englishExplanationTextEl,
     rankEl,
     metaEl,
     button,
@@ -1157,12 +1524,18 @@ function stopActivePronunciationAudio() {
   activePronunciationAudio = null;
 }
 
+function isPersistentTooltipSession(): boolean {
+  return tooltip.host.style.display === "block" &&
+    (activeWordTooltipSource === "selection-translate" || analysisPanelOpen);
+}
+
 function hideTooltip() {
   stopActivePronunciationAudio();
   tooltip.host.style.display = "none";
   tooltip.card.dataset.mode = "word";
   tooltip.wordView.dataset.visible = "true";
   tooltip.analysisView.dataset.visible = "false";
+  tooltip.closeButton.dataset.visible = "false";
   activeResult = null;
   activeAnchorRect = null;
   activeContext = null;
@@ -1172,6 +1545,7 @@ function hideTooltip() {
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
   activePronunciationResult = null;
+  activeWordTooltipSource = "hover-word";
   if (!analysisPanelOpen) {
     activeSelectionContext = null;
   }
@@ -1184,6 +1558,16 @@ function cancelActiveAsyncRequests() {
   activeSentenceAnalysisRequestId += 1;
 }
 
+function resetEnglishExplanationDisplay() {
+  tooltip.englishExplanationEl.dataset.visible = "false";
+  tooltip.englishExplanationTextEl.textContent = "";
+}
+
+function showEnglishExplanation(explanation: string) {
+  tooltip.englishExplanationTextEl.textContent = explanation;
+  tooltip.englishExplanationEl.dataset.visible = "true";
+}
+
 function clearHighlights() {
   if (!supportsHighlights()) {
     return;
@@ -1193,6 +1577,10 @@ function clearHighlights() {
 }
 
 function scheduleHide() {
+  if (isPersistentTooltipSession()) {
+    return;
+  }
+
   if (hideTimer) {
     window.clearTimeout(hideTimer);
   }
@@ -1274,6 +1662,8 @@ function setWordTooltipControls(mode: "word" | "selection") {
   tooltip.metaEl.style.display = isSelection ? "none" : "flex";
   tooltip.llmButton.style.display = "inline-flex";
   tooltip.pronunciationEl.dataset.visible = isSelection ? "false" : "true";
+  tooltip.surfaceEl.style.display = isSelection ? "none" : "block";
+  tooltip.closeButton.dataset.visible = isSelection ? "true" : "false";
   tooltip.britishButton.dataset.playing = "false";
   tooltip.americanButton.dataset.playing = "false";
   tooltip.selectionAnalysisButton.style.display = isSelection ? "inline-flex" : "none";
@@ -1339,10 +1729,11 @@ function renderSelectionTooltip(
   tooltip.wordView.dataset.visible = "true";
   tooltip.analysisView.dataset.visible = "false";
   setWordTooltipControls("selection");
-  tooltip.surfaceEl.textContent = context.text;
+  tooltip.surfaceEl.textContent = "";
   tooltip.primaryTranslationEl.textContent = result?.translation ?? "";
   tooltip.secondaryTranslationEl.textContent = result?.sentenceTranslation ?? "";
   tooltip.secondaryTranslationEl.dataset.visible = result?.sentenceTranslation ? "true" : "false";
+  resetEnglishExplanationDisplay();
   tooltip.translationEl.dataset.visible = result?.translation ? "true" : "false";
   tooltip.hintEl.dataset.visible = "true";
   tooltip.hintEl.dataset.loading = "false";
@@ -1369,11 +1760,12 @@ function showSentenceAnalysisButton(context: SentenceSelectionContext) {
   tooltip.card.dataset.mode = "analysis";
   tooltip.wordView.dataset.visible = "false";
   tooltip.analysisView.dataset.visible = "true";
+  tooltip.closeButton.dataset.visible = "true";
   tooltip.analysisTitleEl.textContent = "长难句分析";
   tooltip.analysisTriggerButton.style.display = "inline-flex";
   tooltip.analysisTriggerButton.textContent = "开始分析";
   tooltip.analysisStatusEl.dataset.loading = "false";
-  tooltip.analysisStatusEl.textContent = "按田静常见讲法来拆：先切层次，再抓主干，再拆枝叶，最后顺译。";
+  tooltip.analysisStatusEl.textContent = "按原来的拆法：先切层次，再抓主干，再拆枝叶，最后顺译。";
   tooltip.analysisLoadingEl.dataset.visible = "false";
   tooltip.analysisSourceEl.textContent = context.text;
   tooltip.analysisLegendEl.innerHTML = "";
@@ -1440,6 +1832,10 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.primaryTranslationEl.textContent = result.translation ?? "";
   tooltip.secondaryTranslationEl.textContent = result.sentenceTranslation ?? "";
   tooltip.secondaryTranslationEl.dataset.visible = result.sentenceTranslation ? "true" : "false";
+  resetEnglishExplanationDisplay();
+  if (result.englishExplanation) {
+    showEnglishExplanation(result.englishExplanation);
+  }
   tooltip.translationEl.dataset.visible = result.translation ? "true" : "false";
   tooltip.hintEl.dataset.visible = result.translation ? "false" : "true";
   tooltip.hintEl.dataset.loading = "false";
@@ -1467,12 +1863,13 @@ function renderSentenceAnalysisPanel(
   tooltip.card.dataset.mode = "analysis";
   tooltip.wordView.dataset.visible = "false";
   tooltip.analysisView.dataset.visible = "true";
+  tooltip.closeButton.dataset.visible = "true";
   tooltip.analysisTitleEl.textContent = "长难句分析";
   tooltip.analysisTriggerButton.style.display = "none";
   tooltip.analysisStatusEl.textContent = "田静风拆法：先找连接标志切层次，再抓主句主干，再拆非谓语和修饰成分，最后顺译。";
   tooltip.analysisStatusEl.dataset.loading = "false";
   tooltip.analysisLoadingEl.dataset.visible = "false";
-  tooltip.analysisSourceEl.innerHTML = renderSentenceMarkup(result, context.text);
+  tooltip.analysisSourceEl.innerHTML = renderSentenceWithClauseBlocks(result, context.text);
   tooltip.analysisLegendEl.innerHTML = renderLegendMarkup(result, context.text);
   tooltip.analysisTranslationEl.textContent = result.translation;
   tooltip.analysisStructureEl.textContent = result.structure;
@@ -1632,6 +2029,7 @@ async function requestTranslation(provider: TranslationProviderChoice) {
   tooltip.primaryTranslationEl.textContent = "";
   tooltip.secondaryTranslationEl.textContent = "";
   tooltip.secondaryTranslationEl.dataset.visible = "false";
+  resetEnglishExplanationDisplay();
   tooltip.hintEl.dataset.visible = "true";
   tooltip.hintEl.dataset.loading = "true";
   tooltip.hintEl.textContent = provider === "llm" ? "LLM 翻译中..." : "Google 翻译中...";
@@ -1680,7 +2078,11 @@ async function requestTranslation(provider: TranslationProviderChoice) {
       response.result.translationProvider === "google-web" ? "Google" : "LLM";
     tooltip.hintEl.dataset.loading = "false";
     tooltip.hintEl.textContent =
-      providerLabel === "Google" ? "默认 Google 结果，不满意可试试 LLM。" : "已使用 LLM 翻译。";
+      providerLabel === "Google"
+        ? "默认 Google 结果，不满意可试试 LLM。"
+        : response.result.englishExplanation
+          ? "已使用 LLM 翻译，并附带英英解释。"
+          : "已使用 LLM 翻译。";
   }
 }
 
@@ -1699,6 +2101,7 @@ async function requestSelectionTranslation(
   renderSelectionTooltip(context);
   tooltip.hintEl.dataset.loading = "true";
   tooltip.hintEl.textContent = provider === "llm" ? "LLM 翻译中..." : "Google 翻译中...";
+  resetEnglishExplanationDisplay();
 
   let response: SelectionTranslationResponse;
 
@@ -1860,6 +2263,7 @@ async function requestSentenceAnalysis(context: SentenceSelectionContext) {
   tooltip.card.dataset.mode = "analysis";
   tooltip.wordView.dataset.visible = "false";
   tooltip.analysisView.dataset.visible = "true";
+  tooltip.closeButton.dataset.visible = "true";
   tooltip.analysisTitleEl.textContent = "长难句分析";
   tooltip.analysisTriggerButton.style.display = "none";
   tooltip.analysisStatusEl.dataset.loading = "true";
@@ -2043,6 +2447,12 @@ tooltip.card.addEventListener("mouseleave", () => {
   scheduleHide();
 });
 
+tooltip.closeButton.addEventListener("click", () => {
+  window.getSelection()?.removeAllRanges();
+  hideSentenceAnalysis();
+  hideTooltip();
+});
+
 tooltip.analysisTriggerButton.addEventListener("mousedown", (event) => {
   event.preventDefault();
   suppressSelectionTriggerUntil = Date.now() + 800;
@@ -2169,6 +2579,10 @@ document.addEventListener(
       return;
     }
 
+    if (isPersistentTooltipSession()) {
+      return;
+    }
+
     const context = getHoverContext(event.clientX, event.clientY);
     const pointerProtected =
       tooltip.host.style.display === "block" &&
@@ -2262,7 +2676,7 @@ document.addEventListener("dblclick", () => {
 document.addEventListener(
   "scroll",
   () => {
-    if (tooltip.host.style.display === "block") {
+    if (tooltip.host.style.display === "block" && !isPersistentTooltipSession()) {
       hideTooltip();
       hideSentenceAnalysis();
     }

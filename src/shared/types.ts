@@ -10,12 +10,15 @@ export interface TranslatorSettings {
   providerModel: string;
   apiKey: string;
   fallbackToGoogle: boolean;
-  llmDisplayMode: "word" | "sentence";
+  llmDisplayMode: "word" | "sentence" | "english";
 }
+
+export type LearnerLevelBand = "A1" | "A2" | "B1" | "B2" | "C1";
 
 export interface TranslationResult {
   translation: string;
   sentenceTranslation?: string;
+  englishExplanation?: string;
   provider: string;
   cached: boolean;
 }
@@ -25,6 +28,13 @@ export interface SelectionTranslationResult {
   translation: string;
   sentenceTranslation?: string;
   translationProvider: string;
+  cached: boolean;
+}
+
+export interface EnglishExplanationResult {
+  meaning: string;
+  explanation: string;
+  provider: string;
   cached: boolean;
 }
 
@@ -51,11 +61,26 @@ export interface SentenceHighlight {
   category: SentenceHighlightCategory;
 }
 
+export type SentenceClauseBlockType =
+  | "main"
+  | "relative"
+  | "subordinate"
+  | "nonfinite"
+  | "parallel"
+  | "modifier";
+
+export interface SentenceClauseBlock {
+  text: string;
+  type: SentenceClauseBlockType;
+  label?: string;
+}
+
 export interface SentenceAnalysisResult {
   translation: string;
   structure: string;
   analysisSteps: string[];
   highlights: SentenceHighlight[];
+  clauseBlocks: SentenceClauseBlock[];
   provider: string;
   cached: boolean;
 }
@@ -70,6 +95,7 @@ export interface LexiconLookupResult {
   reason: "ignored" | "known" | "translate" | "invalid";
   translation?: string;
   sentenceTranslation?: string;
+  englishExplanation?: string;
   translationProvider?: string;
   cached?: boolean;
 }
@@ -84,6 +110,7 @@ export interface WordFlags {
 export interface CacheEntry {
   translation: string;
   sentenceTranslation?: string;
+  englishExplanation?: string;
   provider: string;
   updatedAt: number;
 }
@@ -93,5 +120,12 @@ export interface PronunciationCacheEntry {
   usPhonetic?: string;
   ukAudioUrl?: string;
   usAudioUrl?: string;
+  updatedAt: number;
+}
+
+export interface EnglishExplanationCacheEntry {
+  meaning: string;
+  explanation: string;
+  provider: string;
   updatedAt: number;
 }

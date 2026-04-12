@@ -1,7 +1,7 @@
 import { DEFAULT_KNOWN_BASE_RANK, MAX_KNOWN_BASE_RANK } from "./constants";
 import { BUILTIN_IGNORED_WORDS } from "./ignoredWords";
 import { lookupRank, resolveLookupLemma } from "./lexicon";
-import type { UserSettings, WordFlags } from "./types";
+import type { LearnerLevelBand, UserSettings, WordFlags } from "./types";
 
 export const DEFAULT_SETTINGS: UserSettings = {
   knownBaseRank: DEFAULT_KNOWN_BASE_RANK,
@@ -255,4 +255,26 @@ export function countTotalKnown(settings: UserSettings): number {
   }
 
   return settings.knownBaseRank - basePenalty + countExtraMastered(settings);
+}
+
+export function estimateLearnerLevel(settings: UserSettings): LearnerLevelBand {
+  const knownCount = countTotalKnown(settings);
+
+  if (knownCount <= 1500) {
+    return "A1";
+  }
+
+  if (knownCount <= 3000) {
+    return "A2";
+  }
+
+  if (knownCount <= 5000) {
+    return "B1";
+  }
+
+  if (knownCount <= 8000) {
+    return "B2";
+  }
+
+  return "C1";
 }

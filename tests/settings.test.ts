@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   DEFAULT_SETTINGS,
   countTotalKnown,
+  estimateLearnerLevel,
   looksLikeSpecialTerm,
   removeWordIgnored,
   resolveWordFlags,
@@ -68,6 +69,16 @@ describe("settings resolution", () => {
   test("subtracts forced-unmastered base words from total known count", () => {
     const settings = setWordUnmastered(DEFAULT_SETTINGS, "apple", 120);
     expect(countTotalKnown(settings)).toBe(2499);
+  });
+
+  test("estimates learner level from total known words", () => {
+    expect(estimateLearnerLevel(DEFAULT_SETTINGS)).toBe("A2");
+    expect(
+      estimateLearnerLevel({
+        ...DEFAULT_SETTINGS,
+        knownBaseRank: 5200,
+      }),
+    ).toBe("B2");
   });
 
   test("treats likely names or branded terms outside the lexicon as ignored", () => {

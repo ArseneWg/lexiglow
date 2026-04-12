@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings";
 import { DEFAULT_TRANSLATOR_SETTINGS, sanitizeTranslatorSettings } from "./translator";
 import type {
   CacheEntry,
+  EnglishExplanationCacheEntry,
   PronunciationCacheEntry,
   TranslatorSettings,
   UserSettings,
@@ -77,6 +78,10 @@ function normalizePronunciationCacheKey(surface: string): string {
   return surface.trim().toLowerCase();
 }
 
+function normalizeExplanationCacheKey(surface: string): string {
+  return surface.trim().toLowerCase();
+}
+
 export async function getCachedSelectionTranslation(
   text: string,
   contextText = "",
@@ -97,6 +102,31 @@ export async function setCachedSelectionTranslation(
     provider,
     entry,
   );
+}
+
+export async function getCachedEnglishExplanation(
+  surface: string,
+  contextText = "",
+  levelBand = "",
+): Promise<EnglishExplanationCacheEntry | null> {
+  const key = getCacheKey(
+    `explain:${normalizeExplanationCacheKey(surface)}`,
+    contextText,
+    levelBand,
+  );
+  const result = await chrome.storage.local.get(key);
+  return (result[key] as EnglishExplanationCacheEntry | undefined) ?? null;
+}
+
+export async function setCachedEnglishExplanation(
+  surface: string,
+  contextText: string,
+  levelBand: string,
+  entry: EnglishExplanationCacheEntry,
+): Promise<void> {
+  await chrome.storage.local.set({
+    [getCacheKey(`explain:${normalizeExplanationCacheKey(surface)}`, contextText, levelBand)]: entry,
+  });
 }
 
 export async function getCachedPronunciation(

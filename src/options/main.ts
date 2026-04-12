@@ -71,7 +71,7 @@ app.innerHTML = `
     </section>
     <section class="panel">
       <h2>LLM 翻译设置</h2>
-      <p class="muted">页面默认先显示 Google 单词翻译；当你手动点 LLM 时，会结合句子语境给出更好的结果。你可以选择只显示单词释义，或额外显示整句翻译。API Key 只保存在当前浏览器本地，不会进入 GitHub 仓库。</p>
+      <p class="muted">页面默认先显示 Google 单词翻译；当你手动点 LLM 时，会结合句子语境给出更好的结果。你可以选择只显示单词释义，或额外显示整句翻译 / 英英解释。API Key 只保存在当前浏览器本地，不会进入 GitHub 仓库。</p>
       <div class="rank-controls">
         <input id="providerBaseUrl" type="text" placeholder="Base URL" />
         <input id="providerModel" type="text" placeholder="Model" />
@@ -79,6 +79,7 @@ app.innerHTML = `
         <select id="llmDisplayMode">
           <option value="word">只显示单词翻译</option>
           <option value="sentence">显示单词翻译 + 整句翻译</option>
+          <option value="english">显示单词翻译 + 英英解释</option>
         </select>
         <label class="muted"><input id="fallbackToGoogle" type="checkbox" checked /> 调用失败时自动回退 Google</label>
         <div class="word-actions">
@@ -395,7 +396,12 @@ saveTranslatorButton.addEventListener("click", async () => {
     providerBaseUrl: providerBaseUrl.value,
     providerModel: providerModel.value,
     apiKey: providerApiKey.value,
-    llmDisplayMode: llmDisplayMode.value === "sentence" ? "sentence" : "word",
+    llmDisplayMode:
+      llmDisplayMode.value === "sentence"
+        ? "sentence"
+        : llmDisplayMode.value === "english"
+          ? "english"
+          : "word",
     fallbackToGoogle: fallbackToGoogle.checked,
   });
 });
