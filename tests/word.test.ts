@@ -40,6 +40,27 @@ describe("extractWordAtOffset", () => {
     });
   });
 
+  test("extracts words next to clause punctuation like colons and commas", () => {
+    expect(extractWordAtOffset("Each cycle compounds: brainstorms sharpen plans", 12)).toEqual({
+      surface: "compounds",
+      start: 11,
+      end: 20,
+    });
+    expect(extractWordAtOffset("plans inform future plans, reviews catch more issues", 8)).toEqual({
+      surface: "inform",
+      start: 6,
+      end: 12,
+    });
+  });
+
+  test("extracts sentence-final words before a period", () => {
+    expect(extractWordAtOffset("patterns get documented.", 18)).toEqual({
+      surface: "documented",
+      start: 13,
+      end: 23,
+    });
+  });
+
   test("extracts the hovered subword inside a hyphenated compound", () => {
     expect(extractWordAtOffset("Use mixed-precision training.", 8)).toEqual({
       surface: "mixed",

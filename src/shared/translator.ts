@@ -21,9 +21,39 @@ export const DEFAULT_TRANSLATOR_SETTINGS: TranslatorSettings = {
   llmDisplayMode: "word",
 };
 
+const WORD_TRANSLATION_REQUEST_TIMEOUT_MS = 8000;
+const SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS = 10000;
+const SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 20000;
+
 function trimContext(contextText: string): string {
   const compact = contextText.replace(/\s+/g, " ").trim();
   return compact.length > 220 ? `${compact.slice(0, 217)}...` : compact;
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Translation request timed out.");
+    }
+
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 }
 
 function cleanModelOutput(text: string): string {
@@ -109,6 +139,7 @@ const DICTIONARY_POS_LABELS: Record<string, string> = {
 
 const inFlightPartOfSpeech = new Map<string, Promise<string | undefined>>();
 const cachedPartOfSpeech = new Map<string, string | null>();
+const DICTIONARY_PART_OF_SPEECH_TIMEOUT_MS = 1200;
 
 function formatDictionaryPartOfSpeechLabel(value: string): string | undefined {
   return DICTIONARY_POS_LABELS[value.trim().toLowerCase()];
@@ -183,9 +214,15 @@ export async function lookupDictionaryPartOfSpeech({
 
   if (!pending) {
     pending = (async () => {
+      const controller = new AbortController();
+      const timeoutId = globalThis.setTimeout(() => {
+        controller.abort();
+      }, DICTIONARY_PART_OF_SPEECH_TIMEOUT_MS);
+
       try {
         const response = await fetch(
           `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(query)}`,
+          { signal: controller.signal },
         );
 
         if (!response.ok) {
@@ -198,9 +235,9 @@ export async function lookupDictionaryPartOfSpeech({
         cachedPartOfSpeech.set(query, label ?? null);
         return label;
       } catch {
-        cachedPartOfSpeech.set(query, null);
         return undefined;
       } finally {
+        globalThis.clearTimeout(timeoutId);
         inFlightPartOfSpeech.delete(query);
       }
     })();
@@ -674,14 +711,14 @@ async function requestSentenceAnalysis({
     ],
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
-  });
+  }, SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS);
 
   const payload = (await response.json().catch(() => null)) as
     | {
@@ -834,14 +871,14 @@ async function requestEnglishExplanation({
     ],
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${settings.apiKey}`,
     },
     body: JSON.stringify(body),
-  });
+  }, WORD_TRANSLATION_REQUEST_TIMEOUT_MS);
 
   const payload = (await response.json().catch(() => null)) as
     | {
@@ -952,14 +989,14 @@ export async function translateWithLlm({
     ],
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${settings.apiKey}`,
     },
     body: JSON.stringify(body),
-  });
+  }, WORD_TRANSLATION_REQUEST_TIMEOUT_MS);
 
   const payload = (await response.json().catch(() => null)) as
     | {
@@ -1054,14 +1091,14 @@ export async function translateSelectionWithLlm({
     ],
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${settings.apiKey}`,
     },
     body: JSON.stringify(body),
-  });
+  }, SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS);
 
   const payload = (await response.json().catch(() => null)) as
     | {
@@ -1192,7 +1229,7 @@ export async function translateWithGoogle({
   const url =
     `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=${query}`;
 
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url, {}, WORD_TRANSLATION_REQUEST_TIMEOUT_MS);
 
   if (!response.ok) {
     throw new Error(`Translation request failed: ${response.status}`);
