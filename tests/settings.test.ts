@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS,
   countTotalKnown,
   estimateLearnerLevel,
+  looksLikeContextualSpecialTerm,
   looksLikeSpecialTerm,
   removeWordIgnored,
   resolveWordFlags,
@@ -129,5 +130,20 @@ describe("settings resolution", () => {
     expect(looksLikeSpecialTerm("xian", "xian", null)).toBe(true);
     expect(resolveWordFlags("zhongguo", null, DEFAULT_SETTINGS, "zhongguo").isIgnored).toBe(true);
     expect(resolveWordFlags("beijing", null, DEFAULT_SETTINGS, "beijing").shouldTranslate).toBe(false);
+  });
+
+  test("treats author handles and full names as contextual special terms", () => {
+    expect(
+      looksLikeContextualSpecialTerm("gbarber", "gbarber 3 hours ago | next [–]"),
+    ).toBe(true);
+    expect(
+      looksLikeContextualSpecialTerm("mikeeavns", "805 points by mikeeavns 13 hours ago | hide | past"),
+    ).toBe(true);
+    expect(
+      looksLikeContextualSpecialTerm("Mark", "Mark Zuckerberg said the release will stay small."),
+    ).toBe(true);
+    expect(
+      looksLikeContextualSpecialTerm("received", "We received your package yesterday."),
+    ).toBe(false);
   });
 });

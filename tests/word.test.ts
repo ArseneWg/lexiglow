@@ -108,10 +108,20 @@ describe("selection helpers", () => {
     expect(isEnglishSelectionText("look up")).toBe(true);
     expect(isEnglishSelectionText("He received the package yesterday.")).toBe(true);
     expect(isEnglishSelectionText("Revenue grew by 12.5% in Q4/FY2025.")).toBe(true);
+    expect(isEnglishSelectionText("Ping @alice and confirm the deploy still works.")).toBe(true);
+    expect(isEnglishSelectionText("Review #release-notes and summarize the key changes.")).toBe(true);
+    expect(
+      isEnglishSelectionText(
+        "Open the settings page and confirm you can switch learner language plus OpenAI / Compatible, Gemini, and Claude",
+      ),
+    ).toBe(true);
+    expect(isEnglishSelectionText(`${"This is a longer English paragraph. ".repeat(20).trim()}`)).toBe(true);
   });
 
   test("rejects mentions and non-english selections", () => {
-    expect(isEnglishSelectionText("@somebody replied")).toBe(false);
+    expect(isEnglishSelectionText("@somebody")).toBe(false);
+    expect(isEnglishSelectionText("@somebody @another")).toBe(false);
+    expect(isEnglishSelectionText("#release")).toBe(false);
     expect(isEnglishSelectionText("这是中文")).toBe(false);
   });
 

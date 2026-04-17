@@ -127,6 +127,10 @@ function uniqueNormalizedWords(words: string[]): string[] {
   return [...new Set(words.map((word) => resolveMasteryKey(word)).filter(Boolean))].sort();
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function looksLikeSpecialTerm(surface: string, lemma: string, rank: number | null): boolean {
   if (!surface || !lemma || rank !== null) {
     const trimmedKnown = surface.trim();
@@ -161,6 +165,43 @@ export function looksLikeSpecialTerm(surface: string, lemma: string, rank: numbe
   }
 
   if (looksLikePinyin(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function looksLikeContextualSpecialTerm(surface: string, contextText: string): boolean {
+  const trimmedSurface = surface.trim();
+  const compactContext = contextText.replace(/\s+/g, " ").trim();
+
+  if (!trimmedSurface || !compactContext) {
+    return false;
+  }
+
+  const escapedSurface = escapeRegExp(trimmedSurface);
+
+  if (
+    new RegExp(`\\bby\\s+${escapedSurface}\\b`, "i").test(compactContext) ||
+    new RegExp(
+      `\\b${escapedSurface}\\b\\s+\\d+\\s+(?:minute|minutes|hour|hours|day|days|month|months|year|years)\\s+ago\\b`,
+      "i",
+    ).test(compactContext) ||
+    new RegExp(`\\b${escapedSurface}\\b\\s*\\|\\s*(?:hide|past|favorite|parent|root|next|prev|comments?)\\b`, "i")
+      .test(compactContext)
+  ) {
+    return true;
+  }
+
+  if (!/^[A-Z][a-z]{2,}$/.test(trimmedSurface)) {
+    return false;
+  }
+
+  if (
+    new RegExp(`\\b(?:Mr|Mrs|Ms|Miss|Dr|Prof|Professor|Sir)\\.?\\s+${escapedSurface}\\b`).test(compactContext) ||
+    new RegExp(`\\b[A-Z][a-z]{2,}\\s+${escapedSurface}\\b`).test(compactContext) ||
+    new RegExp(`\\b${escapedSurface}\\s+[A-Z][a-z]{2,}\\b`).test(compactContext)
+  ) {
     return true;
   }
 

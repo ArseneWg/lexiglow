@@ -72,6 +72,8 @@ const LLM_PROVIDER_DEFAULTS = {
 const WORD_TRANSLATION_REQUEST_TIMEOUT_MS = 8000;
 const SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS = 10000;
 const SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 20000;
+const PRESERVE_PROPER_NAMES_INSTRUCTION =
+  "Keep person names, usernames, brand names, and product names in their original English form instead of translating or transliterating them.";
 
 function trimContext(contextText: string): string {
   const compact = contextText.replace(/\s+/g, " ").trim();
@@ -135,6 +137,7 @@ function buildWordTranslationSystemPrompt(
     return (
       `${buildLearnerLevelInstruction(learnerLevel, knownCount)} ` +
       "Translate the target English word or short phrase based on the sentence context. " +
+      `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
       `First identify the exact meaning in ${meaningLanguage}. ` +
       "Then write exactly one short English sentence that explains the word in context. " +
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
@@ -147,6 +150,7 @@ function buildWordTranslationSystemPrompt(
   if (mode === "sentence") {
     return (
       "Translate the target English word or short phrase based on the sentence context. " +
+      `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
       `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","sentence":"<full sentence translation in ${meaningLanguage}>","pos":"<single best part of speech in context>"}. No markdown, no explanation.`
     );
@@ -154,6 +158,7 @@ function buildWordTranslationSystemPrompt(
 
   return (
     "Translate the target English word or short phrase based on the sentence context. " +
+    `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
     "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
     `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","pos":"<single best part of speech in context>"}. No markdown or extra text.`
   );
@@ -164,6 +169,7 @@ function buildSelectionTranslationSystemPrompt(settings: TranslatorSettings): st
 
   return (
     `Translate the selected English text into natural ${meaningLanguage}. ` +
+    `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
     "If the selected text is a single word or a short phrase, translate that unit precisely based on context. " +
     "If the selected text is a clause or a full sentence, translate the whole selected text completely and naturally. " +
     'Return strict JSON only: {"word":"<translation of the selected text in the learner language>"} with no markdown or extra text.'
@@ -177,6 +183,7 @@ function buildSentenceAnalysisPrompt(settings: TranslatorSettings): string {
     `You are an English sentence analysis tutor for learners who prefer ${meaningLanguage}.`,
     "Your goal is to support accurate translation, not abstract grammar discussion.",
     "Every explanation must show how structure affects meaning and the learner's translation order.",
+    PRESERVE_PROPER_NAMES_INSTRUCTION,
     "Keep the wording concrete, useful, and easy to review.",
     "",
     "Return strict compact JSON only with these keys:",

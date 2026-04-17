@@ -14,9 +14,10 @@ import type {
   SettingsResponse,
   TranslationProviderChoice,
 } from "../shared/messages";
-import { DEFAULT_SETTINGS, resolveWordFlags } from "../shared/settings";
+import { DEFAULT_SETTINGS, looksLikeContextualSpecialTerm, resolveWordFlags } from "../shared/settings";
 import { getSettings, getTranslatorSettings } from "../shared/storage";
 import {
+  countEnglishWords,
   createEnglishTokenMatcher,
   extractWordAtOffset,
   isEnglishSelectionText,
@@ -37,6 +38,7 @@ const HOVER_DELAY_MS = 320;
 const HIDE_DELAY_MS = 1200;
 const HIGHLIGHT_NAME = "wordwise-pending";
 const HIGHLIGHT_SCAN_LIMIT = 1200;
+const SELECTION_TRIGGER_DEBOUNCE_MS = 40;
 let currentLearnerLanguageCode: SupportedLearnerLanguageCode = "zh-CN";
 
 function ui(key: Parameters<typeof t>[1], variables?: Record<string, string | number>): string {
@@ -50,9 +52,11 @@ const TOOLTIP_STYLE = `
   .wordwise-card {
     --wordwise-ui-font: "SF Pro Text", "SF Pro SC", "PingFang SC", "Hiragino Sans GB",
       "Microsoft YaHei UI", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+    --wordwise-translation-font: "Iowan Old Style", "Palatino Linotype", "Baskerville",
+      "Noto Serif SC", "Songti SC", "STSong", serif;
     position: fixed;
     min-width: 220px;
-    max-width: 344px;
+    max-width: min(344px, calc(100vw - 24px));
     padding: 14px 15px 13px;
     border-radius: 18px;
     border: 1px solid rgba(148, 163, 184, 0.18);
@@ -94,6 +98,10 @@ const TOOLTIP_STYLE = `
     max-width: 580px;
     max-height: min(72vh, 780px);
     overflow-y: auto;
+  }
+  .wordwise-card[data-layout="selection"][data-mode="word"] {
+    min-width: min(300px, calc(100vw - 24px));
+    max-width: min(468px, calc(100vw - 24px));
   }
   .wordwise-card[data-mode="word"] {
     padding-bottom: 9px;
@@ -232,8 +240,15 @@ const TOOLTIP_STYLE = `
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-translation[data-visible="true"] {
     margin-top: 2px;
-    padding-top: 14px;
-    padding-right: 50px;
+    padding: 16px 54px 13px 15px;
+    border-radius: 18px;
+    border-color: rgba(185, 157, 112, 0.18);
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(248, 244, 236, 0.95) 52%, rgba(241, 235, 224, 0.92));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.82),
+      inset 0 -1px 0 rgba(185, 157, 112, 0.05),
+      0 10px 26px rgba(148, 163, 184, 0.11);
   }
   .wordwise-translation[data-transition="loading"] {
     opacity: 0.68;
@@ -281,10 +296,19 @@ const TOOLTIP_STYLE = `
     font-weight: 540;
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-primary-translation {
-    font-size: 14px;
-    line-height: 1.5;
-    color: #42556c;
-    font-weight: 500;
+    display: block;
+    font-size: 15.5px;
+    line-height: 1.72;
+    color: #24364d;
+    font-weight: 560;
+    letter-spacing: 0.01em;
+    text-wrap: pretty;
+  }
+  .wordwise-word-view[data-layout="selection"] .wordwise-primary-translation-text {
+    display: block;
+    font-family: var(--wordwise-translation-font);
+    text-rendering: optimizeLegibility;
+    color: inherit;
   }
   .wordwise-secondary-translation {
     font-size: 12px;
@@ -297,6 +321,16 @@ const TOOLTIP_STYLE = `
   }
   .wordwise-secondary-translation[data-visible="true"] {
     display: block;
+  }
+  .wordwise-word-view[data-layout="selection"] .wordwise-secondary-translation {
+    margin-top: 11px;
+    padding-top: 10px;
+    font-family: var(--wordwise-translation-font);
+    font-size: 13px;
+    line-height: 1.68;
+    color: #6a7a8d;
+    border-top-color: rgba(185, 157, 112, 0.16);
+    text-wrap: pretty;
   }
   .wordwise-english-explanation {
     display: none;
@@ -1356,6 +1390,64 @@ function extractSentenceAroundRange(text: string, start: number, end: number): s
   return sentence;
 }
 
+function extractContextAroundDomRange(range: Range, fallback: string): string {
+  const startContainer = range.startContainer;
+
+  if (startContainer.nodeType === Node.TEXT_NODE && startContainer === range.endContainer) {
+    const textNode = startContainer as Text;
+    const localText = textNode.textContent ?? "";
+    const localSentence = extractSentenceAroundRange(localText, range.startOffset, range.endOffset);
+
+    if (countEnglishWords(localSentence) >= 4 || /\bby\s+[A-Za-z]/i.test(localSentence)) {
+      return localSentence;
+    }
+  }
+
+  let ancestor: Element | null =
+    range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer as Element
+      : range.commonAncestorContainer.parentElement;
+
+  for (let depth = 0; ancestor && depth < 5; depth += 1, ancestor = ancestor.parentElement) {
+    if (isIgnoredContainer(ancestor)) {
+      continue;
+    }
+
+    const text = ancestor.textContent ?? "";
+    const compact = normalizeSelectionText(text);
+
+    if (!compact || compact === fallback || compact.length > 1200) {
+      continue;
+    }
+
+    try {
+      const prefixRange = document.createRange();
+      prefixRange.selectNodeContents(ancestor);
+      prefixRange.setEnd(range.startContainer, range.startOffset);
+      const start = prefixRange.toString().length;
+
+      const selectionLength = range.toString().length;
+      const candidate = extractSentenceAroundRange(text, start, start + selectionLength);
+
+      if (countEnglishWords(candidate) < 2) {
+        continue;
+      }
+
+      if (
+        /\bby\s+[A-Za-z]/i.test(candidate) ||
+        /\b(?:points?|comments?|hours?\s+ago|minutes?\s+ago|hide|past|favorite|root|parent|next)\b/i.test(candidate) ||
+        countEnglishWords(fallback) < 4
+      ) {
+        return normalizeSelectionText(candidate);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return fallback;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -1941,6 +2033,7 @@ function createTooltipRoot() {
   style.textContent = TOOLTIP_STYLE;
   const card = document.createElement("div");
   card.className = "wordwise-card";
+  card.dataset.layout = "word";
 
   const closeButton = document.createElement("button");
   closeButton.className = "wordwise-close";
@@ -2343,13 +2436,7 @@ function getSelectedWordContext(pointer?: { clientX: number; clientY: number }):
     return null;
   }
 
-  let contextText = surface;
-  const startContainer = range.startContainer;
-
-  if (startContainer.nodeType === Node.TEXT_NODE && startContainer === range.endContainer) {
-    const textNode = startContainer as Text;
-    contextText = extractSentenceAroundRange(textNode.textContent ?? "", range.startOffset, range.endOffset);
-  }
+  const contextText = extractContextAroundDomRange(range, surface);
 
   activeRequestId += 1;
 
@@ -2363,14 +2450,7 @@ function getSelectedWordContext(pointer?: { clientX: number; clientY: number }):
 }
 
 function getSelectionContextText(range: Range, fallback: string): string {
-  const startContainer = range.startContainer;
-
-  if (startContainer.nodeType === Node.TEXT_NODE && startContainer === range.endContainer) {
-    const textNode = startContainer as Text;
-    return extractSentenceAroundRange(textNode.textContent ?? "", range.startOffset, range.endOffset);
-  }
-
-  return fallback;
+  return extractContextAroundDomRange(range, fallback);
 }
 
 function getSelectedTextContext(): SelectedTextContext | null {
@@ -2385,8 +2465,7 @@ function getSelectedTextContext(): SelectedTextContext | null {
 
   if (
     !isEnglishSelectionText(text) ||
-    isIgnoredContainer(range.startContainer) ||
-    isIgnoredContainer(range.endContainer)
+    shouldIgnoreSelectionRange(range)
   ) {
     return null;
   }
@@ -2417,18 +2496,20 @@ function getSelectedSentenceContext(): SentenceSelectionContext | null {
   return context;
 }
 
-function isIgnoredContainer(node: Node): boolean {
-  if (node.getRootNode() === tooltip.host.shadowRoot) {
-    return true;
-  }
+function getNodeElement(node: Node): Element | null {
+  return node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
+}
 
-  const element = node.parentElement;
+function isInsideTooltip(node: Node): boolean {
+  return node.getRootNode() === tooltip.host.shadowRoot;
+}
 
+function isHardIgnoredElement(element: Element | null): boolean {
   if (!element) {
     return false;
   }
 
-  if (element.closest("input, textarea, select, option, code, pre, script, style, noscript")) {
+  if (element.closest("input, textarea, select, option, script, style, noscript")) {
     return true;
   }
 
@@ -2437,6 +2518,49 @@ function isIgnoredContainer(node: Node): boolean {
   }
 
   return false;
+}
+
+function getSoftIgnoredElement(element: Element | null): Element | null {
+  return element?.closest("code, pre") ?? null;
+}
+
+function shouldIgnoreSelectionRange(range: Range): boolean {
+  if (isInsideTooltip(range.startContainer) || isInsideTooltip(range.endContainer)) {
+    return true;
+  }
+
+  const startElement = getNodeElement(range.startContainer);
+  const endElement = getNodeElement(range.endContainer);
+
+  if (isHardIgnoredElement(startElement) || isHardIgnoredElement(endElement)) {
+    return true;
+  }
+
+  const commonElement = getNodeElement(range.commonAncestorContainer);
+
+  if (!commonElement) {
+    return false;
+  }
+
+  return Boolean(getSoftIgnoredElement(commonElement));
+}
+
+function isIgnoredContainer(node: Node): boolean {
+  if (isInsideTooltip(node)) {
+    return true;
+  }
+
+  const element = getNodeElement(node);
+
+  if (!element) {
+    return false;
+  }
+
+  if (isHardIgnoredElement(element)) {
+    return true;
+  }
+
+  return Boolean(getSoftIgnoredElement(element));
 }
 
 function rankLabel(result: LexiconLookupResult): string {
@@ -2549,6 +2673,7 @@ async function refreshLearnerLanguage() {
 let hoverTimer: number | null = null;
 let hideTimer: number | null = null;
 let highlightTimer: number | null = null;
+let selectionTriggerTimer: number | null = null;
 let activeRequestId = 0;
 let activeResult: LexiconLookupResult | null = null;
 let activeAnchorRect: DOMRect | null = null;
@@ -2565,6 +2690,7 @@ let selectionRequestId = 0;
 let analysisPanelOpen = false;
 let activeSentenceAnalysisRequestId = 0;
 let suppressSelectionTriggerUntil = 0;
+let pointerSelecting = false;
 let activeWordTooltipSource: "hover-word" | "review-word" | "selection-translate" = "hover-word";
 let activePronunciationSurface = "";
 let activePronunciationRequestId = 0;
@@ -2588,8 +2714,10 @@ function isPersistentTooltipSession(): boolean {
 
 function hideTooltip() {
   stopActivePronunciationAudio();
+  clearSelectionTriggerTimer();
   tooltip.host.style.display = "none";
   tooltip.card.dataset.mode = "word";
+  tooltip.card.dataset.layout = "word";
   tooltip.wordView.dataset.visible = "true";
   tooltip.analysisView.dataset.visible = "false";
   tooltip.closeButton.dataset.visible = "false";
@@ -2831,6 +2959,7 @@ function positionSentenceAnalysisPanel(rect: DOMRect) {
 
 function setWordTooltipControls(mode: "word" | "selection") {
   const isSelection = mode === "selection";
+  tooltip.card.dataset.layout = mode;
   tooltip.wordView.dataset.layout = mode;
   tooltip.button.style.display = isSelection ? "none" : "inline-flex";
   tooltip.ignoreButton.style.display = isSelection ? "none" : "inline-flex";
@@ -3150,9 +3279,9 @@ async function refreshHighlights() {
 
         const lemma = resolveLookupLemma(segment.surface);
         const rank = lemma ? lookupRank(lemma) : null;
-        const flags = resolveWordFlags(lemma, rank, settings, segment.surface);
+        const contextText = getHighlightTokenContext(textNode, segment.start, segment.end, segment.surface);
 
-        if (!flags.shouldTranslate) {
+        if (!shouldTranslateHighlightToken(segment.surface, lemma, rank, settings, contextText)) {
           continue;
         }
 
@@ -3171,9 +3300,9 @@ async function refreshHighlights() {
       if (!highlightedSegment) {
         const lemma = resolveLookupLemma(surface);
         const rank = lemma ? lookupRank(lemma) : null;
-        const flags = resolveWordFlags(lemma, rank, settings, surface);
+        const contextText = getHighlightTokenContext(textNode, start, end, surface);
 
-        if (flags.shouldTranslate) {
+        if (shouldTranslateHighlightToken(surface, lemma, rank, settings, contextText)) {
           const range = document.createRange();
           range.setStart(textNode, start);
           range.setEnd(textNode, end);
@@ -3207,6 +3336,44 @@ function scheduleHighlightRefresh() {
   highlightTimer = window.setTimeout(() => {
     void refreshHighlights();
   }, 220);
+}
+
+function clearSelectionTriggerTimer() {
+  if (selectionTriggerTimer) {
+    window.clearTimeout(selectionTriggerTimer);
+    selectionTriggerTimer = null;
+  }
+}
+
+function scheduleSelectionTriggerUpdate(delayMs = 0) {
+  clearSelectionTriggerTimer();
+  selectionTriggerTimer = window.setTimeout(() => {
+    selectionTriggerTimer = null;
+    updateSelectionAnalysisTrigger();
+  }, delayMs);
+}
+
+function shouldTranslateHighlightToken(
+  surface: string,
+  lemma: string,
+  rank: number | null,
+  settings: UserSettings,
+  contextText: string,
+): boolean {
+  const flags = resolveWordFlags(lemma, rank, settings, surface);
+
+  if (!flags.shouldTranslate) {
+    return false;
+  }
+
+  return !looksLikeContextualSpecialTerm(surface, contextText);
+}
+
+function getHighlightTokenContext(textNode: Text, start: number, end: number, fallback: string): string {
+  const range = document.createRange();
+  range.setStart(textNode, start);
+  range.setEnd(textNode, end);
+  return extractContextAroundDomRange(range, fallback);
 }
 
 async function resolveHoverWord(context: HoverContext) {
@@ -3886,14 +4053,14 @@ document.addEventListener("mouseup", (event) => {
     return;
   }
 
-  if (event.detail >= 2) {
+  pointerSelecting = false;
+
+  if (event.detail === 2) {
     suppressSelectionTriggerUntil = Date.now() + 500;
     return;
   }
 
-  window.setTimeout(() => {
-    updateSelectionAnalysisTrigger();
-  }, 0);
+  scheduleSelectionTriggerUpdate();
 });
 
 document.addEventListener("keyup", (event) => {
@@ -3904,11 +4071,31 @@ document.addEventListener("keyup", (event) => {
   const key = event.key ?? "";
 
   if (key === "Shift" || key.startsWith("Arrow")) {
-    window.setTimeout(() => {
-      updateSelectionAnalysisTrigger();
-    }, 0);
+    scheduleSelectionTriggerUpdate();
   }
 });
+
+document.addEventListener("selectionchange", () => {
+  if (pointerSelecting || Date.now() < suppressSelectionTriggerUntil) {
+    return;
+  }
+
+  scheduleSelectionTriggerUpdate(SELECTION_TRIGGER_DEBOUNCE_MS);
+});
+
+window.addEventListener("pointerup", () => {
+  if (!pointerSelecting) {
+    return;
+  }
+
+  pointerSelecting = false;
+
+  if (Date.now() < suppressSelectionTriggerUntil) {
+    return;
+  }
+
+  scheduleSelectionTriggerUpdate();
+}, { passive: true });
 
 document.addEventListener("dblclick", (event) => {
   window.setTimeout(() => {
@@ -3962,6 +4149,7 @@ window.addEventListener("resize", () => {
 });
 
 window.addEventListener("blur", () => {
+  pointerSelecting = false;
   hideTooltip();
   hideSentenceAnalysis();
 });
@@ -3977,6 +4165,8 @@ document.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  pointerSelecting = true;
+  clearSelectionTriggerTimer();
   hideTooltip();
   hideSentenceAnalysis();
 });

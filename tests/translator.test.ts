@@ -223,6 +223,9 @@ describe("llm provider requests", () => {
     expect((request.headers as Record<string, string>).Authorization).toBe("Bearer openai-key");
     expect(payload.model).toBe("gpt-4.1-mini");
     expect(payload.messages[0]?.content).toContain("Japanese (ja)");
+    expect(payload.messages[0]?.content).toContain(
+      "Keep person names, usernames, brand names, and product names in their original English form",
+    );
     expect(payload.messages.at(-1)?.content).toContain("selected_text: preserves");
     expect(payload.response_format).toBeUndefined();
   });
@@ -266,6 +269,9 @@ describe("llm provider requests", () => {
     expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent");
     expect((request.headers as Record<string, string>)["x-goog-api-key"]).toBe("gemini-key");
     expect(payload.system_instruction.parts[0]?.text).toContain("French (fr)");
+    expect(payload.system_instruction.parts[0]?.text).toContain(
+      "Keep person names, usernames, brand names, and product names in their original English form",
+    );
     expect(payload.contents[0]?.role).toBe("user");
     expect(payload.contents[0]?.parts[0]?.text).toContain("selected_text: preserves");
     expect(payload.generationConfig.responseMimeType).toBe("application/json");
@@ -307,6 +313,9 @@ describe("llm provider requests", () => {
     expect((request.headers as Record<string, string>)["anthropic-version"]).toBe("2023-06-01");
     expect(payload.model).toBe("claude-sonnet-4-20250514");
     expect(payload.system).toContain("German (de)");
+    expect(payload.system).toContain(
+      "Keep person names, usernames, brand names, and product names in their original English form",
+    );
     expect(payload.messages[0]?.content).toContain("selected_text: preserves");
     expect(payload.max_tokens).toBe(180);
   });
@@ -357,6 +366,9 @@ describe("sentence analysis parsing", () => {
     };
 
     expect(payload.messages[0]?.content).toContain("Korean (ko)");
+    expect(payload.messages[0]?.content).toContain(
+      "Keep person names, usernames, brand names, and product names in their original English form",
+    );
     expect(payload.messages.at(-1)?.content).toBe(`sentence: ${longSentence.trim()}`);
   });
 

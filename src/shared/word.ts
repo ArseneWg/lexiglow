@@ -6,6 +6,7 @@ export interface WordAtOffset {
 
 const ENGLISH_TOKEN_SOURCE = "[A-Za-z]+(?:'[A-Za-z]+)?";
 const ENGLISH_WORD_RE = new RegExp(`^${ENGLISH_TOKEN_SOURCE}$`);
+const MAX_SELECTION_TEXT_LENGTH = 1200;
 
 export function createEnglishTokenMatcher(): RegExp {
   return new RegExp(ENGLISH_TOKEN_SOURCE, "g");
@@ -88,6 +89,22 @@ function isLikelyTechnicalToken(text: string): boolean {
   );
 }
 
+function isLikelyHandleOrTagOnlySelection(text: string): boolean {
+  const compact = normalizeSelectionText(text);
+
+  if (!compact) {
+    return false;
+  }
+
+  const stripped = compact.replace(/[()[\]{}"'`.,!?;:]+/g, " ").replace(/\s+/g, " ").trim();
+
+  if (!stripped) {
+    return false;
+  }
+
+  return /^(?:[@#][A-Za-z0-9_]+)(?:\s+[@#][A-Za-z0-9_]+)*$/.test(stripped);
+}
+
 export function normalizeSelectionText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -104,11 +121,11 @@ export function countEnglishWords(text: string): number {
 export function isEnglishSelectionText(text: string): boolean {
   const compact = normalizeSelectionText(text);
 
-  if (!compact || compact.length > 360 || /[\u4e00-\u9fff]/u.test(compact)) {
+  if (!compact || compact.length > MAX_SELECTION_TEXT_LENGTH || /[\u4e00-\u9fff]/u.test(compact)) {
     return false;
   }
 
-  if (/[@#][A-Za-z0-9_]/.test(compact)) {
+  if (isLikelyHandleOrTagOnlySelection(compact)) {
     return false;
   }
 

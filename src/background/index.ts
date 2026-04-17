@@ -25,6 +25,8 @@ import {
   selectVoiceForAccent,
 } from "../shared/pronunciation";
 import {
+  looksLikeContextualSpecialTerm,
+  looksLikeSpecialTerm,
   removeWordIgnored,
   resolveWordFlags,
   estimateLearnerLevel,
@@ -63,6 +65,7 @@ import type {
   SentenceAnalysisCacheEntry,
   SentenceAnalysisResult,
   TranslationResult,
+  WordFlags,
 } from "../shared/types";
 
 function ui(languageCode: string, key: Parameters<typeof t>[1], variables?: Record<string, string | number>) {
@@ -85,6 +88,45 @@ function clearRuntimeCaches() {
   englishExplanationCache.clear();
   pronunciationCache.clear();
   sentenceAnalysisCache.clear();
+}
+
+function resolveFlagsWithContext(
+  flags: WordFlags,
+  surface: string,
+  contextText: string,
+): WordFlags {
+  if (!flags.shouldTranslate || !looksLikeContextualSpecialTerm(surface, contextText)) {
+    return flags;
+  }
+
+  return {
+    ...flags,
+    isIgnored: true,
+    isKnown: false,
+    shouldTranslate: false,
+    reason: "ignored",
+  };
+}
+
+function shouldPreserveSelectionText(text: string, contextText: string): boolean {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/^[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){1,2}$/.test(trimmed)) {
+    return true;
+  }
+
+  if (!/^[A-Za-z]+(?:'[A-Za-z]+)?$/.test(trimmed)) {
+    return false;
+  }
+
+  const lemma = resolveLookupLemma(trimmed);
+  const rank = lemma ? lookupRank(lemma) : null;
+
+  return looksLikeContextualSpecialTerm(trimmed, contextText) || looksLikeSpecialTerm(trimmed, lemma, rank);
 }
 
 async function translateByChoice({
@@ -263,10 +305,11 @@ async function getOrTranslateSelection(
 
 async function handleLookup(message: LookupWordMessage): Promise<LexiconLookupResult> {
   const surface = message.payload.surface;
+  const contextText = message.payload.contextText?.trim() ?? "";
   const lemma = resolveLookupLemma(surface);
   const settings = await getSettings();
   const rank = lemma ? lookupRank(lemma) : null;
-  const flags = resolveWordFlags(lemma, rank, settings, surface);
+  const flags = resolveFlagsWithContext(resolveWordFlags(lemma, rank, settings, surface), surface, contextText);
 
   if (!lemma) {
     return {
@@ -293,7 +336,7 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
   const lemma = resolveLookupLemma(surface);
   const settings = await getSettings();
   const rank = lemma ? lookupRank(lemma) : null;
-  const flags = resolveWordFlags(lemma, rank, settings, surface);
+  const flags = resolveFlagsWithContext(resolveWordFlags(lemma, rank, settings, surface), surface, contextText);
 
   if (!lemma) {
     return {
@@ -509,6 +552,15 @@ async function handleTranslateSelection(
     return {
       text,
       translation: ui(translatorSettings.learnerLanguageCode, "tooltipTranslationUnavailable"),
+      translationProvider: message.payload.provider === "llm" ? "llm" : "google-web",
+      cached: false,
+    };
+  }
+
+  if (shouldPreserveSelectionText(text, contextText)) {
+    return {
+      text,
+      translation: text,
       translationProvider: message.payload.provider === "llm" ? "llm" : "google-web",
       cached: false,
     };
