@@ -122,4 +122,12 @@ describe("settings resolution", () => {
     expect(looksLikeSpecialTerm("Torvalds", "torvalds", 9000)).toBe(true);
     expect(looksLikeSpecialTerm("swyx", "swyx", null)).toBe(true);
   });
+
+  test("treats common pinyin-like romanization as ignored", () => {
+    expect(looksLikeSpecialTerm("zhongguo", "zhongguo", null)).toBe(true);
+    expect(looksLikeSpecialTerm("beijing", "beijing", null)).toBe(true);
+    expect(looksLikeSpecialTerm("xian", "xian", null)).toBe(true);
+    expect(resolveWordFlags("zhongguo", null, DEFAULT_SETTINGS, "zhongguo").isIgnored).toBe(true);
+    expect(resolveWordFlags("beijing", null, DEFAULT_SETTINGS, "beijing").shouldTranslate).toBe(false);
+  });
 });
