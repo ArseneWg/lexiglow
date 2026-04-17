@@ -101,6 +101,50 @@ export function countEnglishWords(text: string): number {
   return normalizeSelectionText(text).match(matcher)?.length ?? 0;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getLineBounds(text: string, start: number, end: number): { lineStart: number; lineEnd: number } {
+  const lineStart = text.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  const nextBreak = text.indexOf("\n", end);
+
+  return {
+    lineStart,
+    lineEnd: nextBreak >= 0 ? nextBreak : text.length,
+  };
+}
+
+export function isAuthorBylineWord(
+  text: string,
+  surface: string,
+  start: number,
+  end: number,
+): boolean {
+  const normalizedSurface = normalizeSelectionText(surface).toLowerCase();
+
+  if (!normalizedSurface || normalizedSurface.length > 40) {
+    return false;
+  }
+
+  const bounds = getLineBounds(text, start, end);
+  const line = text.slice(bounds.lineStart, bounds.lineEnd).trim();
+
+  if (!line) {
+    return false;
+  }
+
+  const compactLine = line.toLowerCase();
+  const escapedSurface = escapeRegExp(normalizedSurface);
+  const bylinePattern = new RegExp(`\\bby\\s+${escapedSurface}\\b`);
+
+  if (!bylinePattern.test(compactLine)) {
+    return false;
+  }
+
+  return /\b(points?|comments?|hours?|minutes?|days?)\b/.test(compactLine) || /\bago\b/.test(compactLine) || /\|\s*hide\b/.test(compactLine);
+}
+
 export function isEnglishSelectionText(text: string): boolean {
   const compact = normalizeSelectionText(text);
 

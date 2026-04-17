@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   countEnglishWords,
   extractWordAtOffset,
+  isAuthorBylineWord,
   isEnglishSelectionText,
   isSingleEnglishWord,
   normalizeSingleEnglishWord,
@@ -126,5 +127,13 @@ describe("selection helpers", () => {
   test("counts english words in normalized selections", () => {
     expect(countEnglishWords("in   charge   of")).toBe(3);
     expect(countEnglishWords("mixed-precision")).toBe(2);
+  });
+
+  test("detects hacker-news style author bylines", () => {
+    const line = "149 points by scaredpelican 8 hours ago | hide | 32 comments";
+    const start = line.indexOf("scaredpelican");
+    expect(isAuthorBylineWord(line, "scaredpelican", start, start + "scaredpelican".length)).toBe(true);
+    expect(isAuthorBylineWord(line, "149", 0, 3)).toBe(false);
+    expect(isAuthorBylineWord("By the way, we should ship it.", "way", 3, 6)).toBe(false);
   });
 });

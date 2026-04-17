@@ -19,6 +19,7 @@ import { getSettings, getTranslatorSettings } from "../shared/storage";
 import {
   createEnglishTokenMatcher,
   extractWordAtOffset,
+  isAuthorBylineWord,
   isEnglishSelectionText,
   isSingleEnglishWord,
   normalizeSelectionText,
@@ -3140,6 +3141,11 @@ async function refreshHighlights() {
         continue;
       }
 
+      if (isAuthorBylineWord(text, surface, start, end)) {
+        match = matcher.exec(text);
+        continue;
+      }
+
       const segments = getHighlightSegments(surface, start);
       let highlightedSegment = false;
 
@@ -3623,6 +3629,10 @@ function getHoverContext(clientX: number, clientY: number): HoverContext | null 
   const word = extractWordAtOffset(text, caret.offset);
 
   if (!word) {
+    return null;
+  }
+
+  if (isAuthorBylineWord(text, word.surface, word.start, word.end)) {
     return null;
   }
 
