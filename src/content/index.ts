@@ -40,9 +40,19 @@ const HIGHLIGHT_NAME = "wordwise-pending";
 const HIGHLIGHT_SCAN_LIMIT = 1200;
 const SELECTION_TRIGGER_DEBOUNCE_MS = 40;
 let currentLearnerLanguageCode: SupportedLearnerLanguageCode = "zh-CN";
+let currentDefaultTranslationProvider: TranslationProviderChoice = "google";
+let activeDisplayedTranslationProvider: TranslationProviderChoice = "google";
 
 function ui(key: Parameters<typeof t>[1], variables?: Record<string, string | number>): string {
   return t(currentLearnerLanguageCode, key, variables);
+}
+
+function normalizeDisplayedTranslationProvider(provider?: string): TranslationProviderChoice {
+  return provider === "llm" ? "llm" : "google";
+}
+
+function getAlternateTranslationProvider(provider: TranslationProviderChoice): TranslationProviderChoice {
+  return provider === "llm" ? "google" : "llm";
 }
 
 const TOOLTIP_STYLE = `
@@ -2627,6 +2637,27 @@ function restoreWordMetaRank() {
   tooltip.rankEl.textContent = tooltip.rankEl.dataset.rankLabel ?? "";
 }
 
+function getTranslationActionButtonText(provider: TranslationProviderChoice): string {
+  return provider === "llm" ? ui("tooltipContextTranslate") : ui("tooltipGoogleTranslate");
+}
+
+function getTranslationActionPrompt(provider: TranslationProviderChoice): string {
+  return provider === "llm"
+    ? ui("tooltipSwitchToContextualTranslation")
+    : ui("tooltipSwitchToGoogleTranslation");
+}
+
+function setDisplayedTranslationProvider(provider: TranslationProviderChoice) {
+  activeDisplayedTranslationProvider = provider;
+  const nextProvider = getAlternateTranslationProvider(provider);
+  tooltip.llmButton.dataset.provider = nextProvider;
+  tooltip.llmButton.textContent = getTranslationActionButtonText(nextProvider);
+
+  if (tooltip.hintEl.dataset.kind === "prompt") {
+    tooltip.hintEl.textContent = getTranslationActionPrompt(nextProvider);
+  }
+}
+
 function runtimeSend<T>(message: RuntimeMessage): Promise<T> {
   const runtimeApi = globalThis.chrome?.runtime;
 
@@ -2680,7 +2711,6 @@ installHighlightStyle();
 
 function applyTooltipLocale() {
   tooltip.closeButton.setAttribute("aria-label", ui("tooltipClose"));
-  tooltip.llmButton.textContent = ui("tooltipContextTranslate");
   tooltip.britishLabel.textContent = ui("tooltipUk");
   tooltip.britishButton.setAttribute("aria-label", ui("tooltipPlayUkPronunciation"));
   tooltip.americanLabel.textContent = ui("tooltipUs");
@@ -2698,19 +2728,20 @@ function applyTooltipLocale() {
   tooltip.analysisTranslationLabel.textContent = ui("tooltipTranslation");
   tooltip.analysisStructureLabel.textContent = ui("tooltipBackbone");
   tooltip.analysisStepsLabel.textContent = ui("tooltipAnalysisSteps");
-
-  if (tooltip.hintEl.dataset.kind === "prompt") {
-    tooltip.hintEl.textContent = ui("tooltipSwitchToContextualTranslation");
-  }
+  setDisplayedTranslationProvider(activeDisplayedTranslationProvider);
 }
 
 async function refreshLearnerLanguage() {
   try {
-    currentLearnerLanguageCode = (await getTranslatorSettings()).learnerLanguageCode;
+    const translatorSettings = await getTranslatorSettings();
+    currentLearnerLanguageCode = translatorSettings.learnerLanguageCode;
+    currentDefaultTranslationProvider = translatorSettings.defaultTranslationProvider;
   } catch {
     currentLearnerLanguageCode = "zh-CN";
+    currentDefaultTranslationProvider = "google";
   }
 
+  activeDisplayedTranslationProvider = currentDefaultTranslationProvider;
   applyTooltipLocale();
 }
 
@@ -2777,6 +2808,7 @@ function hideTooltip() {
   activePronunciationSurface = "";
   activePronunciationResult = null;
   activeWordTooltipSource = "hover-word";
+  activeDisplayedTranslationProvider = currentDefaultTranslationProvider;
   if (!analysisPanelOpen) {
     activeSelectionContext = null;
   }
@@ -3102,6 +3134,9 @@ function renderSelectionTooltip(
     translationProvider?: string;
   },
 ) {
+  const displayedProvider = result?.translationProvider
+    ? normalizeDisplayedTranslationProvider(result.translationProvider)
+    : currentDefaultTranslationProvider;
   tooltip.card.dataset.mode = "word";
   tooltip.wordView.dataset.visible = "true";
   tooltip.analysisView.dataset.visible = "false";
@@ -3119,7 +3154,7 @@ function renderSelectionTooltip(
   tooltip.hintEl.dataset.visible = "true";
   tooltip.hintEl.dataset.loading = "false";
   tooltip.hintEl.dataset.kind = "status";
-  tooltip.hintEl.textContent = isLlmTranslationProvider(result?.translationProvider)
+  tooltip.hintEl.textContent = displayedProvider === "llm"
     ? ui("tooltipContextualTranslationUsed")
     : ui("tooltipDefaultGoogleResult");
   tooltip.rankEl.dataset.kind = "rank";
@@ -3130,6 +3165,7 @@ function renderSelectionTooltip(
   activeSelectionTooltipContext = context;
   activeSelectionContext = context;
   activeWordTooltipSource = "selection-translate";
+  setDisplayedTranslationProvider(displayedProvider);
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
   activeContext = null;
@@ -3209,6 +3245,9 @@ function isPointerInTooltipCorridor(clientX: number, clientY: number): boolean {
 }
 
 function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
+  const displayedProvider = result.translationProvider
+    ? normalizeDisplayedTranslationProvider(result.translationProvider)
+    : currentDefaultTranslationProvider;
   tooltip.card.dataset.mode = "word";
   tooltip.wordView.dataset.visible = "true";
   tooltip.analysisView.dataset.visible = "false";
@@ -3239,9 +3278,10 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.hintEl.dataset.loading = "false";
   if (!result.translation) {
     tooltip.hintEl.dataset.kind = "prompt";
-    tooltip.hintEl.textContent = ui("tooltipSwitchToContextualTranslation");
+    tooltip.hintEl.textContent = getTranslationActionPrompt(getAlternateTranslationProvider(displayedProvider));
     tooltip.secondaryTranslationEl.dataset.visible = "false";
   }
+  setDisplayedTranslationProvider(displayedProvider);
   tooltip.rankEl.dataset.kind = "rank";
   tooltip.rankEl.dataset.rankLabel = rankLabel(result);
   tooltip.rankEl.textContent = tooltip.rankEl.dataset.rankLabel;
@@ -3486,7 +3526,7 @@ async function resolveHoverWord(context: HoverContext) {
 
   activeContext = context;
   renderTooltip(response.result, context.rect);
-  await requestTranslationForContext("google", context);
+  await requestTranslationForContext(currentDefaultTranslationProvider, context);
 }
 
 async function requestTranslation(provider: TranslationProviderChoice) {
@@ -3495,6 +3535,7 @@ async function requestTranslation(provider: TranslationProviderChoice) {
   }
 
   const requestContext = activeContext;
+  setDisplayedTranslationProvider(provider);
   activeTranslationRequestId += 1;
   const translationRequestId = activeTranslationRequestId;
   const preservingPreviousResult = beginTranslationTransition();
@@ -3566,6 +3607,7 @@ async function requestSelectionTranslation(
   }
 
   activeSelectionTooltipContext = context;
+  setDisplayedTranslationProvider(provider);
   activeSelectionTranslationRequestId += 1;
   const translationRequestId = activeSelectionTranslationRequestId;
   const preservingPreviousResult = beginTranslationTransition();
@@ -3918,7 +3960,7 @@ function updateSelectionAnalysisTrigger() {
   cancelActiveAsyncRequests();
   hideSentenceAnalysis();
   renderSelectionTooltip(context);
-  void requestSelectionTranslation("google", context);
+  void requestSelectionTranslation(currentDefaultTranslationProvider, context);
 }
 
 tooltip.card.addEventListener("mouseenter", () => {
@@ -4015,12 +4057,14 @@ tooltip.button.addEventListener("click", async () => {
 });
 
 tooltip.llmButton.addEventListener("click", async () => {
+  const provider = tooltip.llmButton.dataset.provider === "google" ? "google" : "llm";
+
   if (activeSelectionTooltipContext) {
-    await requestSelectionTranslation("llm", activeSelectionTooltipContext);
+    await requestSelectionTranslation(provider, activeSelectionTooltipContext);
     return;
   }
 
-  await requestTranslation("llm");
+  await requestTranslation(provider);
 });
 
 tooltip.britishButton.addEventListener("click", async () => {

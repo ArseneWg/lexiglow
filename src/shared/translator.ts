@@ -16,6 +16,7 @@ import type {
 } from "./types";
 
 export const DEFAULT_TRANSLATOR_SETTINGS: TranslatorSettings = {
+  defaultTranslationProvider: "google",
   llmProvider: "openai",
   providerBaseUrl: "https://api.openai.com/v1",
   providerModel: "gpt-4.1-mini",
@@ -1648,6 +1649,7 @@ export function sanitizeTranslatorSettings(
       : "openai";
 
   return {
+    defaultTranslationProvider: input?.defaultTranslationProvider === "llm" ? "llm" : "google",
     llmProvider,
     providerBaseUrl: input?.providerBaseUrl?.trim() || getDefaultLlmBaseUrl(llmProvider),
     providerModel: input?.providerModel?.trim() || getDefaultLlmModel(llmProvider),

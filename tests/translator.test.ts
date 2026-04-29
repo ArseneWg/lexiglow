@@ -51,6 +51,11 @@ describe("llm response parsing", () => {
     expect(sanitizeTranslatorSettings({}).llmDisplayMode).toBe("word");
   });
 
+  test("defaults the automatic translation provider to google", () => {
+    expect(sanitizeTranslatorSettings({}).defaultTranslationProvider).toBe("google");
+    expect(sanitizeTranslatorSettings({ defaultTranslationProvider: "llm" }).defaultTranslationProvider).toBe("llm");
+  });
+
   test("accepts english as llm display mode", () => {
     expect(sanitizeTranslatorSettings({ llmDisplayMode: "english" }).llmDisplayMode).toBe("english");
   });
@@ -392,6 +397,7 @@ describe("sentence analysis parsing", () => {
     await analyzeSentenceWithLlm({
       text: longSentence,
       settings: {
+        defaultTranslationProvider: "google",
         llmProvider: "openai",
         providerBaseUrl: "https://example.com/v1",
         providerModel: "test-model",

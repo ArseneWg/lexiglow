@@ -23,6 +23,7 @@ export type SupportedLearnerLanguageCode =
   | "ar";
 
 export interface TranslatorSettings {
+  defaultTranslationProvider: "google" | "llm";
   llmProvider: "openai" | "gemini" | "claude";
   providerBaseUrl: string;
   providerModel: string;

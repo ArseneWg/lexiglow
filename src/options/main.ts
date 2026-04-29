@@ -54,6 +54,7 @@ let ignoredCount!: HTMLElement;
 let searchInput!: HTMLInputElement;
 let searchResults!: HTMLElement;
 let learnerLanguageCode!: HTMLSelectElement;
+let defaultTranslationProvider!: HTMLSelectElement;
 let llmProvider!: HTMLSelectElement;
 let providerBaseUrl!: HTMLInputElement;
 let providerModel!: HTMLInputElement;
@@ -91,6 +92,7 @@ function assignRefs() {
   searchInput = document.querySelector<HTMLInputElement>("#searchInput")!;
   searchResults = document.querySelector<HTMLElement>("#searchResults")!;
   learnerLanguageCode = document.querySelector<HTMLSelectElement>("#learnerLanguageCode")!;
+  defaultTranslationProvider = document.querySelector<HTMLSelectElement>("#defaultTranslationProvider")!;
   llmProvider = document.querySelector<HTMLSelectElement>("#llmProvider")!;
   providerBaseUrl = document.querySelector<HTMLInputElement>("#providerBaseUrl")!;
   providerModel = document.querySelector<HTMLInputElement>("#providerModel")!;
@@ -272,6 +274,7 @@ function renderAll() {
   extraKnownCount.textContent = String(countExtraMastered(settings));
   ignoredCount.textContent = String(settings.ignoredWords.length);
   learnerLanguageCode.value = translatorSettings.learnerLanguageCode;
+  defaultTranslationProvider.value = translatorSettings.defaultTranslationProvider;
   llmProvider.value = translatorSettings.llmProvider;
   providerBaseUrl.value = translatorSettings.providerBaseUrl;
   providerModel.value = translatorSettings.providerModel;
@@ -369,6 +372,7 @@ function bindEvents() {
               : llmProvider.value === "claude"
                 ? "claude"
                 : "openai",
+          defaultTranslationProvider: defaultTranslationProvider.value === "llm" ? "llm" : "google",
           learnerLanguageCode: learnerLanguageCode.value as TranslatorSettings["learnerLanguageCode"],
           providerBaseUrl: providerBaseUrl.value,
           providerModel: providerModel.value,
@@ -448,6 +452,11 @@ function renderShell() {
         <div class="rank-controls">
           <label class="muted" for="learnerLanguageCode">${ui("optionsLearnerLanguage")}</label>
           <select id="learnerLanguageCode">${renderLanguageOptionsMarkup()}</select>
+          <label class="muted" for="defaultTranslationProvider">${ui("optionsDefaultTranslationProvider")}</label>
+          <select id="defaultTranslationProvider">
+            <option value="google">${ui("optionsDefaultTranslationProviderGoogle")}</option>
+            <option value="llm">${ui("optionsDefaultTranslationProviderLlm")}</option>
+          </select>
           <select id="llmProvider">
             <option value="openai">OpenAI / Compatible</option>
             <option value="gemini">Gemini</option>

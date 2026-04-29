@@ -114,6 +114,7 @@ describe("settings storage", () => {
     const settings = await getTranslatorSettings();
 
     expect(settings).toEqual(expect.objectContaining({
+      defaultTranslationProvider: "google",
       learnerLanguageCode: "zh-CN",
     }));
   });
@@ -121,11 +122,13 @@ describe("settings storage", () => {
   test("writes translator settings to local storage only", async () => {
     await saveTranslatorSettings({
       ...DEFAULT_TRANSLATOR_SETTINGS,
+      defaultTranslationProvider: "llm",
       learnerLanguageCode: "ja",
     });
 
     expect(localArea.set).toHaveBeenCalledWith({
       [STORAGE_TRANSLATOR_SETTINGS_KEY]: expect.objectContaining({
+        defaultTranslationProvider: "llm",
         learnerLanguageCode: "ja",
       }),
     });

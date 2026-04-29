@@ -20,6 +20,9 @@ const UI_STRINGS_EN = {
   optionsTranslationSettings: "Translation Settings",
   optionsTranslationDescription: "Google gives a quick first result. Context translation uses your LLM for better in-context meanings. The UI and translation language follow the learner language. API keys stay in local browser storage only.",
   optionsLearnerLanguage: "Learner language",
+  optionsDefaultTranslationProvider: "Default translation source",
+  optionsDefaultTranslationProviderGoogle: "Google",
+  optionsDefaultTranslationProviderLlm: "LLM",
   optionsApiKeyPlaceholder: "API Key (stored locally only)",
   optionsDisplayModeWord: "Meaning only",
   optionsDisplayModeSentence: "Meaning + full sentence",
@@ -68,6 +71,8 @@ const UI_STRINGS_EN = {
   tooltipClose: "Close",
   tooltipSwitchToContextualTranslation: "Switch to contextual translation.",
   tooltipContextTranslate: "Context Translate",
+  tooltipSwitchToGoogleTranslation: "Switch to Google translation.",
+  tooltipGoogleTranslate: "Google",
   tooltipUk: "UK",
   tooltipPlayUkPronunciation: "Play UK pronunciation",
   tooltipUs: "US",
@@ -103,7 +108,7 @@ const UI_STRINGS_EN = {
 } as const;
 
 export type UiStringKey = keyof typeof UI_STRINGS_EN;
-type UiDictionary = Record<UiStringKey, string>;
+type UiDictionary = Partial<Record<UiStringKey, string>>;
 
 const UI_STRINGS: Record<SupportedLearnerLanguageCode, UiDictionary> = {
   "zh-CN": {
@@ -126,6 +131,9 @@ const UI_STRINGS: Record<SupportedLearnerLanguageCode, UiDictionary> = {
     optionsTranslationSettings: "翻译设置",
     optionsTranslationDescription: "Google 提供快速初始结果；语境翻译会使用你的 LLM 获取更准确的上下文含义。界面和翻译语言都会跟随学习语言。API Key 仅保存在本地浏览器。",
     optionsLearnerLanguage: "学习语言",
+    optionsDefaultTranslationProvider: "默认翻译来源",
+    optionsDefaultTranslationProviderGoogle: "Google",
+    optionsDefaultTranslationProviderLlm: "LLM",
     optionsApiKeyPlaceholder: "API Key（仅本地保存）",
     optionsDisplayModeWord: "只显示词义",
     optionsDisplayModeSentence: "词义 + 整句翻译",
@@ -174,6 +182,8 @@ const UI_STRINGS: Record<SupportedLearnerLanguageCode, UiDictionary> = {
     tooltipClose: "关闭",
     tooltipSwitchToContextualTranslation: "可切换到语境翻译。",
     tooltipContextTranslate: "语境翻译",
+    tooltipSwitchToGoogleTranslation: "可切换到 Google 翻译。",
+    tooltipGoogleTranslate: "Google",
     tooltipUk: "英式",
     tooltipPlayUkPronunciation: "播放英式发音",
     tooltipUs: "美式",
@@ -227,6 +237,9 @@ const UI_STRINGS: Record<SupportedLearnerLanguageCode, UiDictionary> = {
     optionsTranslationSettings: "翻譯設定",
     optionsTranslationDescription: "Google 提供快速初始結果；語境翻譯會使用你的 LLM 取得更準確的上下文詞義。介面與翻譯語言都會跟隨學習語言。API Key 只保存在本機瀏覽器。",
     optionsLearnerLanguage: "學習語言",
+    optionsDefaultTranslationProvider: "預設翻譯來源",
+    optionsDefaultTranslationProviderGoogle: "Google",
+    optionsDefaultTranslationProviderLlm: "LLM",
     optionsApiKeyPlaceholder: "API Key（僅本機保存）",
     optionsDisplayModeWord: "只顯示詞義",
     optionsDisplayModeSentence: "詞義 + 整句翻譯",
@@ -275,6 +288,8 @@ const UI_STRINGS: Record<SupportedLearnerLanguageCode, UiDictionary> = {
     tooltipClose: "關閉",
     tooltipSwitchToContextualTranslation: "可切換到語境翻譯。",
     tooltipContextTranslate: "語境翻譯",
+    tooltipSwitchToGoogleTranslation: "可切換到 Google 翻譯。",
+    tooltipGoogleTranslate: "Google",
     tooltipUk: "英式",
     tooltipPlayUkPronunciation: "播放英式發音",
     tooltipUs: "美式",
