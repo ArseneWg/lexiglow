@@ -2,13 +2,17 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   analyzeSentenceWithLlm,
+  DEFAULT_TRANSLATOR_PROFILE,
   getLlmCacheSignature,
   getTranslatorCacheTtlMs,
   parseEnglishExplanationResponse,
   parseGoogleTranslateResponse,
   parseLlmTranslationResponse,
   parseSentenceAnalysisResponse,
+  resolveActiveTranslatorProfile,
+  sanitizeTranslatorProfile,
   sanitizeTranslatorSettings,
+  sanitizeTranslatorSettingsState,
   summarizeDictionaryPartOfSpeech,
   translateSelectionWithLlm,
 } from "../src/shared/translator";
@@ -117,6 +121,70 @@ describe("llm response parsing", () => {
       providerModel: "gpt-4.1-mini",
       learnerLanguageCode: "ja",
     }))).toBe("gemini::https://api.openai.com/v1::gpt-4.1-mini::ja");
+  });
+
+  test("sanitizes translator profiles with defaults", () => {
+    expect(sanitizeTranslatorProfile({
+      name: "  Local Qwen  ",
+      learnerLanguageCode: "ja",
+    }, "local-qwen", "Local Qwen")).toEqual(expect.objectContaining({
+      id: "local-qwen",
+      name: "Local Qwen",
+      learnerLanguageCode: "ja",
+      defaultTranslationProvider: "google",
+    }));
+  });
+
+  test("sanitizes translator settings state and restores a valid active profile", () => {
+    const state = sanitizeTranslatorSettingsState({
+      activeProfileId: "missing",
+      profiles: [
+        {
+          ...DEFAULT_TRANSLATOR_PROFILE,
+          id: "gpu",
+          name: "GPUStack",
+          defaultTranslationProvider: "llm",
+          providerBaseUrl: "https://gpustack.rock-chips.com/v1",
+          providerModel: "qwen3.5-397b-a17b",
+        },
+      ],
+    });
+
+    expect(state.activeProfileId).toBe("gpu");
+    expect(state.profiles[0]).toEqual(expect.objectContaining({
+      id: "gpu",
+      name: "GPUStack",
+      defaultTranslationProvider: "llm",
+    }));
+  });
+
+  test("resolves the active translator profile from state", () => {
+    const state = sanitizeTranslatorSettingsState({
+      activeProfileId: "local-qwen",
+      profiles: [
+        {
+          ...DEFAULT_TRANSLATOR_PROFILE,
+          id: "openai",
+          name: "OpenAI",
+          providerModel: "gpt-4.1-mini",
+        },
+        {
+          ...DEFAULT_TRANSLATOR_PROFILE,
+          id: "local-qwen",
+          name: "Local Qwen",
+          defaultTranslationProvider: "llm",
+          providerBaseUrl: "https://gpustack.rock-chips.com/v1",
+          providerModel: "qwen3.5-397b-a17b",
+        },
+      ],
+    });
+
+    expect(resolveActiveTranslatorProfile(state)).toEqual(expect.objectContaining({
+      id: "local-qwen",
+      name: "Local Qwen",
+      defaultTranslationProvider: "llm",
+      providerModel: "qwen3.5-397b-a17b",
+    }));
   });
 
   test("reads structured english explanation payload", () => {

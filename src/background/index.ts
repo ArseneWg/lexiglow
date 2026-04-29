@@ -4,6 +4,7 @@ import type {
   AnalyzeSelectionMessage,
   GetSettingsMessage,
   GetTranslatorSettingsMessage,
+  GetTranslatorSettingsStateMessage,
   LookupPronunciationMessage,
   LookupWordMessage,
   PronunciationLookupResponse,
@@ -11,6 +12,7 @@ import type {
   RemoveWordIgnoredMessage,
   RuntimeMessage,
   SaveTranslatorSettingsMessage,
+  SaveTranslatorSettingsStateMessage,
   SelectionTranslationResponse,
   SetWordIgnoredMessage,
   SetWordMasteredMessage,
@@ -38,8 +40,10 @@ import {
 import {
   getSettings,
   getTranslatorSettings,
+  getTranslatorSettingsState,
   saveSettings,
   saveTranslatorSettings,
+  saveTranslatorSettingsState,
 } from "../shared/storage";
 import { createMemoryCache } from "../shared/memoryCache";
 import {
@@ -761,11 +765,23 @@ async function handleGetTranslatorSettings(_message: GetTranslatorSettingsMessag
   return { ok: true, settings };
 }
 
+async function handleGetTranslatorSettingsState(_message: GetTranslatorSettingsStateMessage) {
+  const state = await getTranslatorSettingsState();
+  return { ok: true, state };
+}
+
 async function handleSaveTranslatorSettings(message: SaveTranslatorSettingsMessage) {
   await saveTranslatorSettings(message.payload.settings);
   clearRuntimeCaches();
   const settings = await getTranslatorSettings();
   return { ok: true, settings };
+}
+
+async function handleSaveTranslatorSettingsState(message: SaveTranslatorSettingsStateMessage) {
+  await saveTranslatorSettingsState(message.payload.state);
+  clearRuntimeCaches();
+  const state = await getTranslatorSettingsState();
+  return { ok: true, state };
 }
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
@@ -810,8 +826,14 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
       case "GET_TRANSLATOR_SETTINGS":
         sendResponse(await handleGetTranslatorSettings(message));
         break;
+      case "GET_TRANSLATOR_SETTINGS_STATE":
+        sendResponse(await handleGetTranslatorSettingsState(message));
+        break;
       case "SAVE_TRANSLATOR_SETTINGS":
         sendResponse(await handleSaveTranslatorSettings(message));
+        break;
+      case "SAVE_TRANSLATOR_SETTINGS_STATE":
+        sendResponse(await handleSaveTranslatorSettingsState(message));
         break;
       default:
         sendResponse({ ok: false, error: "Unknown message type." });

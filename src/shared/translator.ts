@@ -10,8 +10,10 @@ import type {
   SentenceHighlight,
   SentenceHighlightCategory,
   SupportedLearnerLanguageCode,
+  TranslatorProfile,
   TranslationResult,
   TranslatorSettings,
+  TranslatorSettingsState,
   UserSettings,
 } from "./types";
 
@@ -26,6 +28,17 @@ export const DEFAULT_TRANSLATOR_SETTINGS: TranslatorSettings = {
   llmDisplayMode: "word",
   cacheDurationValue: 30,
   cacheDurationUnit: "minutes",
+};
+
+export const DEFAULT_TRANSLATOR_PROFILE: TranslatorProfile = {
+  id: "default-profile",
+  name: "Default",
+  ...DEFAULT_TRANSLATOR_SETTINGS,
+};
+
+export const DEFAULT_TRANSLATOR_SETTINGS_STATE: TranslatorSettingsState = {
+  activeProfileId: DEFAULT_TRANSLATOR_PROFILE.id,
+  profiles: [DEFAULT_TRANSLATOR_PROFILE],
 };
 
 export const LEARNER_LANGUAGE_OPTIONS = [
@@ -1665,6 +1678,47 @@ export function sanitizeTranslatorSettings(
     cacheDurationValue,
     cacheDurationUnit: input?.cacheDurationUnit === "hours" ? "hours" : "minutes",
   };
+}
+
+export function sanitizeTranslatorProfile(
+  input?: Partial<TranslatorProfile> | null,
+  fallbackId = DEFAULT_TRANSLATOR_PROFILE.id,
+  fallbackName = DEFAULT_TRANSLATOR_PROFILE.name,
+): TranslatorProfile {
+  return {
+    id: input?.id?.trim() || fallbackId,
+    name: input?.name?.trim() || fallbackName,
+    ...sanitizeTranslatorSettings(input),
+  };
+}
+
+export function sanitizeTranslatorSettingsState(
+  input?: Partial<TranslatorSettingsState> | null,
+): TranslatorSettingsState {
+  const rawProfiles = Array.isArray(input?.profiles) ? input.profiles : [];
+  const profiles = rawProfiles.length
+    ? rawProfiles.map((profile, index) =>
+        sanitizeTranslatorProfile(
+          profile,
+          `profile-${index + 1}`,
+          profile?.name?.trim() || `Profile ${index + 1}`,
+        ))
+      : [DEFAULT_TRANSLATOR_PROFILE];
+
+  const activeProfileId = profiles.some((profile) => profile.id === input?.activeProfileId)
+    ? (input?.activeProfileId as string)
+    : profiles[0]?.id ?? DEFAULT_TRANSLATOR_PROFILE.id;
+
+  return {
+    activeProfileId,
+    profiles,
+  };
+}
+
+export function resolveActiveTranslatorProfile(state: TranslatorSettingsState): TranslatorProfile {
+  return state.profiles.find((profile) => profile.id === state.activeProfileId)
+    ?? state.profiles[0]
+    ?? DEFAULT_TRANSLATOR_PROFILE;
 }
 
 export function getTranslatorCacheTtlMs(settings: TranslatorSettings): number {

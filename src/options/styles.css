@@ -73,6 +73,17 @@ body {
   gap: 12px;
 }
 
+.profile-toolbar {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .rank-header {
   display: flex;
   align-items: baseline;
@@ -185,6 +196,11 @@ button {
   padding: 8px 12px;
   font-size: 13px;
   cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .primary {

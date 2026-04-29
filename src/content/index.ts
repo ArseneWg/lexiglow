@@ -65,7 +65,9 @@ const TOOLTIP_STYLE = `
     --wordwise-translation-font: "SF Pro Display", "SF Pro Text", "SF Pro SC", "PingFang SC",
       "Hiragino Sans GB", "Microsoft YaHei UI", "Segoe UI", -apple-system, BlinkMacSystemFont,
       sans-serif;
-    --wordwise-selection-translation-size: 15.25px;
+    --wordwise-selection-translation-size: 16.4px;
+    --wordwise-selection-secondary-size: 13px;
+    --wordwise-selection-line-height: 1.74;
     position: fixed;
     min-width: 220px;
     max-width: min(344px, calc(100vw - 24px));
@@ -112,8 +114,8 @@ const TOOLTIP_STYLE = `
     overflow-y: auto;
   }
   .wordwise-card[data-layout="selection"][data-mode="word"] {
-    min-width: min(300px, calc(100vw - 24px));
-    max-width: min(468px, calc(100vw - 24px));
+    min-width: min(320px, calc(100vw - 24px));
+    max-width: min(496px, calc(100vw - 24px));
   }
   .wordwise-card[data-mode="word"] {
     padding-bottom: 9px;
@@ -251,16 +253,17 @@ const TOOLTIP_STYLE = `
     padding-top: 10px;
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-translation[data-visible="true"] {
-    margin-top: 2px;
-    padding: 16px 54px 13px 15px;
-    border-radius: 18px;
-    border-color: rgba(185, 157, 112, 0.18);
+    margin-top: 4px;
+    padding: 18px 18px 14px;
+    border-radius: 20px;
+    border-color: rgba(198, 168, 118, 0.22);
     background:
-      linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(248, 244, 236, 0.95) 52%, rgba(241, 235, 224, 0.92));
+      radial-gradient(circle at top right, rgba(255, 236, 199, 0.28), transparent 28%),
+      linear-gradient(145deg, rgba(255, 255, 255, 0.985), rgba(250, 246, 239, 0.96) 52%, rgba(243, 237, 228, 0.94));
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.82),
-      inset 0 -1px 0 rgba(185, 157, 112, 0.05),
-      0 10px 26px rgba(148, 163, 184, 0.11);
+      inset 0 1px 0 rgba(255, 255, 255, 0.84),
+      inset 0 -1px 0 rgba(198, 168, 118, 0.06),
+      0 12px 28px rgba(148, 163, 184, 0.12);
   }
   .wordwise-translation[data-transition="loading"] {
     opacity: 0.68;
@@ -308,12 +311,13 @@ const TOOLTIP_STYLE = `
     font-weight: 540;
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-primary-translation {
-    display: block;
+    display: grid;
+    gap: 7px;
     font-size: var(--wordwise-selection-translation-size);
-    line-height: 1.78;
-    color: #22354b;
-    font-weight: 540;
-    letter-spacing: 0.005em;
+    line-height: var(--wordwise-selection-line-height);
+    color: #203248;
+    font-weight: 590;
+    letter-spacing: 0.01em;
     text-wrap: pretty;
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-primary-translation-text {
@@ -322,6 +326,18 @@ const TOOLTIP_STYLE = `
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     color: inherit;
+  }
+  .wordwise-word-view[data-layout="selection"] .wordwise-primary-translation-pos[data-visible="true"] {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: rgba(207, 181, 136, 0.14);
+    color: #7b6747;
+    font-size: 10.5px;
+    line-height: 1;
+    letter-spacing: 0.03em;
   }
   .wordwise-secondary-translation {
     font-size: 12px;
@@ -336,13 +352,13 @@ const TOOLTIP_STYLE = `
     display: block;
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-secondary-translation {
-    margin-top: 11px;
-    padding-top: 10px;
+    margin-top: 13px;
+    padding-top: 12px;
     font-family: var(--wordwise-ui-font);
-    font-size: 12.75px;
-    line-height: 1.72;
-    color: #66788d;
-    border-top-color: rgba(185, 157, 112, 0.16);
+    font-size: var(--wordwise-selection-secondary-size);
+    line-height: 1.76;
+    color: #607287;
+    border-top-color: rgba(198, 168, 118, 0.18);
     text-wrap: pretty;
   }
   .wordwise-english-explanation {
@@ -474,44 +490,55 @@ const TOOLTIP_STYLE = `
     background: transparent;
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-actions {
-    gap: 4px;
-    margin-top: 2px;
-    padding: 3px;
-    border-radius: 12px;
-    border: 1px solid rgba(148, 163, 184, 0.08);
-    background:
-      linear-gradient(180deg, rgba(239, 243, 248, 0.88), rgba(231, 237, 245, 0.82));
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.66),
-      inset 0 -1px 0 rgba(148, 163, 184, 0.06),
-      0 2px 8px rgba(148, 163, 184, 0.04);
-    width: fit-content;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    width: 100%;
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-button {
     position: relative;
     z-index: 1;
-    min-height: 28px;
-    min-width: 80px;
-    padding: 0 11px;
-    border-radius: 9px;
-    font-size: 10px;
-    font-weight: 570;
-    letter-spacing: -0.01em;
-    color: #5d6d82;
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
+    min-height: 30px;
+    min-width: 84px;
+    padding: 0 12px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 580;
+    letter-spacing: 0.01em;
+    color: #53657a;
+    background: rgba(255, 255, 255, 0.84);
+    border-color: rgba(198, 168, 118, 0.16);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.78),
+      0 1px 2px rgba(148, 163, 184, 0.06);
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-button--secondary {
-    background: transparent;
-    color: #627286;
-    border-color: transparent;
+    background: rgba(255, 255, 255, 0.84);
+    color: #5c6f84;
+    border-color: rgba(198, 168, 118, 0.14);
   }
   .wordwise-word-view[data-layout="selection"] .wordwise-button:hover {
     transform: translateY(0);
-    background: rgba(255, 255, 255, 0.48);
-    border-color: transparent;
-    color: #40526a;
+    background: rgba(255, 255, 255, 0.96);
+    border-color: rgba(198, 168, 118, 0.24);
+    color: #38506b;
+  }
+  .wordwise-word-view[data-layout="selection"] .wordwise-meta {
+    justify-content: flex-start;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 11px;
+    border-top-color: rgba(198, 168, 118, 0.15);
+  }
+  .wordwise-word-view[data-layout="selection"] .wordwise-hint {
+    font-size: 11px;
+    line-height: 1.35;
+    color: #8b7353;
+    letter-spacing: 0.02em;
+    text-align: left;
   }
   .wordwise-meta {
     display: flex;
@@ -2517,14 +2544,33 @@ function getNodeElement(node: Node): Element | null {
   return node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
 }
 
-const MIN_SELECTION_TRANSLATION_FONT_SIZE_PX = 13;
-const MAX_SELECTION_TRANSLATION_FONT_SIZE_PX = 20;
+const MIN_SELECTION_TRANSLATION_FONT_SIZE_PX = 15.4;
+const MAX_SELECTION_TRANSLATION_FONT_SIZE_PX = 18.8;
+const MIN_SELECTION_SECONDARY_FONT_SIZE_PX = 12.6;
+const MAX_SELECTION_SECONDARY_FONT_SIZE_PX = 14.2;
 
-function clampSelectionTranslationFontSizePx(fontSizePx: number): number {
-  return Math.min(
+function clampSelectionTypographyValue(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function deriveSelectionTranslationFontSizePx(sourceFontSizePx: number): number {
+  return clampSelectionTypographyValue(
+    sourceFontSizePx * 0.74 + 4,
+    MIN_SELECTION_TRANSLATION_FONT_SIZE_PX,
     MAX_SELECTION_TRANSLATION_FONT_SIZE_PX,
-    Math.max(MIN_SELECTION_TRANSLATION_FONT_SIZE_PX, fontSizePx),
   );
+}
+
+function deriveSelectionSecondaryFontSizePx(translationFontSizePx: number): number {
+  return clampSelectionTypographyValue(
+    translationFontSizePx * 0.79,
+    MIN_SELECTION_SECONDARY_FONT_SIZE_PX,
+    MAX_SELECTION_SECONDARY_FONT_SIZE_PX,
+  );
+}
+
+function deriveSelectionLineHeight(translationFontSizePx: number): number {
+  return translationFontSizePx >= 17.6 ? 1.7 : 1.76;
 }
 
 function parsePixelSize(value: string): number | null {
@@ -2547,7 +2593,7 @@ function resolveSelectionFontSizePx(range: Range): number | undefined {
     const fontSizePx = parsePixelSize(window.getComputedStyle(element).fontSize);
 
     if (fontSizePx !== null) {
-      return clampSelectionTranslationFontSizePx(fontSizePx);
+      return fontSizePx;
     }
   }
 
@@ -2906,14 +2952,22 @@ function showEnglishExplanation(explanation: string) {
 
 function applySelectionTypography(context?: Pick<SelectedTextContext, "selectedFontSizePx"> | null) {
   if (context?.selectedFontSizePx) {
+    const translationFontSizePx = deriveSelectionTranslationFontSizePx(context.selectedFontSizePx);
+    const secondaryFontSizePx = deriveSelectionSecondaryFontSizePx(translationFontSizePx);
+    const lineHeight = deriveSelectionLineHeight(translationFontSizePx);
+
     tooltip.card.style.setProperty(
       "--wordwise-selection-translation-size",
-      `${context.selectedFontSizePx}px`,
+      `${translationFontSizePx}px`,
     );
+    tooltip.card.style.setProperty("--wordwise-selection-secondary-size", `${secondaryFontSizePx}px`);
+    tooltip.card.style.setProperty("--wordwise-selection-line-height", `${lineHeight}`);
     return;
   }
 
   tooltip.card.style.removeProperty("--wordwise-selection-translation-size");
+  tooltip.card.style.removeProperty("--wordwise-selection-secondary-size");
+  tooltip.card.style.removeProperty("--wordwise-selection-line-height");
 }
 
 function setTranslationPresentation(

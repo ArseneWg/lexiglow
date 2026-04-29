@@ -5,6 +5,7 @@ import type {
   SentenceAnalysisResult,
   SelectionTranslationResult,
   TranslatorSettings,
+  TranslatorSettingsState,
   UserSettings,
 } from "./types";
 
@@ -63,10 +64,21 @@ export interface GetTranslatorSettingsMessage {
   type: "GET_TRANSLATOR_SETTINGS";
 }
 
+export interface GetTranslatorSettingsStateMessage {
+  type: "GET_TRANSLATOR_SETTINGS_STATE";
+}
+
 export interface SaveTranslatorSettingsMessage {
   type: "SAVE_TRANSLATOR_SETTINGS";
   payload: {
     settings: TranslatorSettings;
+  };
+}
+
+export interface SaveTranslatorSettingsStateMessage {
+  type: "SAVE_TRANSLATOR_SETTINGS_STATE";
+  payload: {
+    state: TranslatorSettingsState;
   };
 }
 
@@ -120,7 +132,9 @@ export type RuntimeMessage =
   | UpdateBaseRankMessage
   | GetSettingsMessage
   | GetTranslatorSettingsMessage
+  | GetTranslatorSettingsStateMessage
   | SaveTranslatorSettingsMessage
+  | SaveTranslatorSettingsStateMessage
   | TranslateWordMessage
   | AnalyzeSelectionMessage
   | TranslateSelectionMessage
@@ -142,6 +156,12 @@ export interface SettingsResponse {
 export interface TranslatorSettingsResponse {
   ok: boolean;
   settings?: TranslatorSettings;
+  error?: string;
+}
+
+export interface TranslatorSettingsStateResponse {
+  ok: boolean;
+  state?: TranslatorSettingsState;
   error?: string;
 }
 

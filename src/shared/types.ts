@@ -35,6 +35,16 @@ export interface TranslatorSettings {
   cacheDurationUnit: "minutes" | "hours";
 }
 
+export interface TranslatorProfile extends TranslatorSettings {
+  id: string;
+  name: string;
+}
+
+export interface TranslatorSettingsState {
+  activeProfileId: string;
+  profiles: TranslatorProfile[];
+}
+
 export type LearnerLevelBand = "A1" | "A2" | "B1" | "B2" | "C1";
 
 export interface TranslationResult {

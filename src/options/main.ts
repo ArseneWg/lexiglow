@@ -2,7 +2,7 @@ import "./styles.css";
 
 import { t } from "../shared/i18n";
 import { LEXICON_WORDS, lookupRank, resolveLookupLemma } from "../shared/lexicon";
-import type { RuntimeMessage, TranslatorSettingsResponse } from "../shared/messages";
+import type { RuntimeMessage, TranslatorSettingsStateResponse } from "../shared/messages";
 import {
   clearLearningProgress,
   countExtraMastered,
@@ -15,14 +15,18 @@ import {
   setWordUnmastered,
   updateKnownBaseRank,
 } from "../shared/settings";
-import { getSettings, getTranslatorSettings, saveSettings } from "../shared/storage";
+import { getSettings, getTranslatorSettingsState, saveSettings } from "../shared/storage";
 import {
+  DEFAULT_TRANSLATOR_PROFILE,
   DEFAULT_TRANSLATOR_SETTINGS,
+  DEFAULT_TRANSLATOR_SETTINGS_STATE,
   getDefaultLlmBaseUrl,
   getDefaultLlmModel,
   LEARNER_LANGUAGE_OPTIONS,
+  resolveActiveTranslatorProfile,
+  sanitizeTranslatorProfile,
 } from "../shared/translator";
-import type { TranslatorSettings, UserSettings } from "../shared/types";
+import type { TranslatorProfile, TranslatorSettings, TranslatorSettingsState, UserSettings } from "../shared/types";
 
 interface SearchEntry {
   lemma: string;
@@ -43,6 +47,7 @@ const appRoot = app;
 
 let settings: UserSettings;
 let translatorSettings: TranslatorSettings = DEFAULT_TRANSLATOR_SETTINGS;
+let translatorSettingsState: TranslatorSettingsState = DEFAULT_TRANSLATOR_SETTINGS_STATE;
 
 let rankValue!: HTMLElement;
 let rankRange!: HTMLInputElement;
@@ -53,6 +58,11 @@ let extraKnownCount!: HTMLElement;
 let ignoredCount!: HTMLElement;
 let searchInput!: HTMLInputElement;
 let searchResults!: HTMLElement;
+let profileSelect!: HTMLSelectElement;
+let newProfileButton!: HTMLButtonElement;
+let duplicateProfileButton!: HTMLButtonElement;
+let renameProfileButton!: HTMLButtonElement;
+let deleteProfileButton!: HTMLButtonElement;
 let learnerLanguageCode!: HTMLSelectElement;
 let defaultTranslationProvider!: HTMLSelectElement;
 let llmProvider!: HTMLSelectElement;
@@ -81,6 +91,88 @@ function renderLanguageOptionsMarkup(): string {
     .join("");
 }
 
+function renderProfileOptionsMarkup(): string {
+  return translatorSettingsState.profiles
+    .map((profile) => {
+      const selected = profile.id === translatorSettingsState.activeProfileId ? ' selected' : "";
+      return `<option value="${profile.id}"${selected}>${profile.name}</option>`;
+    })
+    .join("");
+}
+
+function getActiveProfile(): TranslatorProfile {
+  return resolveActiveTranslatorProfile(translatorSettingsState);
+}
+
+function updateActiveTranslatorSettings() {
+  translatorSettings = getActiveProfile();
+}
+
+function createProfileId(): string {
+  return `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildProfileFromForm(profile: TranslatorProfile): TranslatorProfile {
+  return sanitizeTranslatorProfile({
+    id: profile.id,
+    name: profile.name,
+    llmProvider:
+      llmProvider.value === "gemini"
+        ? "gemini"
+        : llmProvider.value === "claude"
+          ? "claude"
+          : "openai",
+    defaultTranslationProvider: defaultTranslationProvider.value === "llm" ? "llm" : "google",
+    learnerLanguageCode: learnerLanguageCode.value as TranslatorSettings["learnerLanguageCode"],
+    providerBaseUrl: providerBaseUrl.value,
+    providerModel: providerModel.value,
+    apiKey: providerApiKey.value,
+    llmDisplayMode:
+      llmDisplayMode.value === "sentence"
+        ? "sentence"
+        : llmDisplayMode.value === "english"
+          ? "english"
+          : "word",
+    cacheDurationValue: Number(cacheDurationValue.value),
+    cacheDurationUnit: cacheDurationUnit.value === "hours" ? "hours" : "minutes",
+    fallbackToGoogle: fallbackToGoogle.checked,
+  }, profile.id, profile.name);
+}
+
+function syncActiveProfileFromForm() {
+  const activeProfile = getActiveProfile();
+  const nextProfile = buildProfileFromForm(activeProfile);
+
+  translatorSettingsState = {
+    ...translatorSettingsState,
+    profiles: translatorSettingsState.profiles.map((profile) =>
+      profile.id === activeProfile.id ? nextProfile : profile),
+  };
+  translatorSettings = nextProfile;
+}
+
+function promptProfileName(initialValue: string): string | null {
+  const value = window.prompt(ui("optionsProfileNamePrompt"), initialValue);
+  const trimmed = value?.trim() ?? "";
+  return trimmed || null;
+}
+
+function createProfile(name: string, seed?: Partial<TranslatorProfile>): TranslatorProfile {
+  const id = createProfileId();
+
+  return sanitizeTranslatorProfile({
+    ...DEFAULT_TRANSLATOR_PROFILE,
+    ...seed,
+    id,
+    name,
+  }, id, name);
+}
+
+function setTranslatorSettingsState(state: TranslatorSettingsState) {
+  translatorSettingsState = state;
+  updateActiveTranslatorSettings();
+}
+
 function assignRefs() {
   rankValue = document.querySelector<HTMLElement>("#rankValue")!;
   rankRange = document.querySelector<HTMLInputElement>("#rankRange")!;
@@ -91,6 +183,11 @@ function assignRefs() {
   ignoredCount = document.querySelector<HTMLElement>("#ignoredCount")!;
   searchInput = document.querySelector<HTMLInputElement>("#searchInput")!;
   searchResults = document.querySelector<HTMLElement>("#searchResults")!;
+  profileSelect = document.querySelector<HTMLSelectElement>("#profileSelect")!;
+  newProfileButton = document.querySelector<HTMLButtonElement>("#newProfileButton")!;
+  duplicateProfileButton = document.querySelector<HTMLButtonElement>("#duplicateProfileButton")!;
+  renameProfileButton = document.querySelector<HTMLButtonElement>("#renameProfileButton")!;
+  deleteProfileButton = document.querySelector<HTMLButtonElement>("#deleteProfileButton")!;
   learnerLanguageCode = document.querySelector<HTMLSelectElement>("#learnerLanguageCode")!;
   defaultTranslationProvider = document.querySelector<HTMLSelectElement>("#defaultTranslationProvider")!;
   llmProvider = document.querySelector<HTMLSelectElement>("#llmProvider")!;
@@ -273,6 +370,8 @@ function renderAll() {
   totalKnownCount.textContent = String(countTotalKnown(settings));
   extraKnownCount.textContent = String(countExtraMastered(settings));
   ignoredCount.textContent = String(settings.ignoredWords.length);
+  profileSelect.value = translatorSettingsState.activeProfileId;
+  deleteProfileButton.disabled = translatorSettingsState.profiles.length <= 1;
   learnerLanguageCode.value = translatorSettings.learnerLanguageCode;
   defaultTranslationProvider.value = translatorSettings.defaultTranslationProvider;
   llmProvider.value = translatorSettings.llmProvider;
@@ -361,37 +460,116 @@ function bindEvents() {
     await persistSettings(clearLearningProgress(settings));
   });
 
+  profileSelect.addEventListener("change", () => {
+    syncActiveProfileFromForm();
+    translatorSettingsState = {
+      ...translatorSettingsState,
+      activeProfileId: profileSelect.value,
+    };
+    updateActiveTranslatorSettings();
+    renderShell();
+    renderAll();
+  });
+
+  newProfileButton.addEventListener("click", () => {
+    syncActiveProfileFromForm();
+    const name = promptProfileName(
+      ui("optionsProfileDefaultName", {
+        index: translatorSettingsState.profiles.length + 1,
+      }),
+    );
+
+    if (!name) {
+      return;
+    }
+
+    const profile = createProfile(name);
+    translatorSettingsState = {
+      activeProfileId: profile.id,
+      profiles: [...translatorSettingsState.profiles, profile],
+    };
+    updateActiveTranslatorSettings();
+    renderShell();
+    renderAll();
+  });
+
+  duplicateProfileButton.addEventListener("click", () => {
+    syncActiveProfileFromForm();
+    const activeProfile = getActiveProfile();
+    const name = promptProfileName(`${activeProfile.name} ${ui("optionsProfileCopySuffix")}`);
+
+    if (!name) {
+      return;
+    }
+
+    const profile = createProfile(name, activeProfile);
+    translatorSettingsState = {
+      activeProfileId: profile.id,
+      profiles: [...translatorSettingsState.profiles, profile],
+    };
+    updateActiveTranslatorSettings();
+    renderShell();
+    renderAll();
+  });
+
+  renameProfileButton.addEventListener("click", () => {
+    syncActiveProfileFromForm();
+    const activeProfile = getActiveProfile();
+    const name = promptProfileName(activeProfile.name);
+
+    if (!name || name === activeProfile.name) {
+      return;
+    }
+
+    translatorSettingsState = {
+      ...translatorSettingsState,
+      profiles: translatorSettingsState.profiles.map((profile) =>
+        profile.id === activeProfile.id ? { ...profile, name } : profile),
+    };
+    updateActiveTranslatorSettings();
+    renderShell();
+    renderAll();
+  });
+
+  deleteProfileButton.addEventListener("click", () => {
+    if (translatorSettingsState.profiles.length <= 1) {
+      return;
+    }
+
+    syncActiveProfileFromForm();
+    const activeProfile = getActiveProfile();
+    const confirmed = window.confirm(
+      ui("optionsDeleteProfileConfirm", {
+        name: activeProfile.name,
+      }),
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const profiles = translatorSettingsState.profiles.filter((profile) => profile.id !== activeProfile.id);
+    translatorSettingsState = {
+      activeProfileId: profiles[0]?.id ?? DEFAULT_TRANSLATOR_PROFILE.id,
+      profiles,
+    };
+    updateActiveTranslatorSettings();
+    renderShell();
+    renderAll();
+  });
+
   saveTranslatorButton.addEventListener("click", async () => {
-    const response = await runtimeSend<TranslatorSettingsResponse>({
-      type: "SAVE_TRANSLATOR_SETTINGS",
+    syncActiveProfileFromForm();
+
+    const response = await runtimeSend<TranslatorSettingsStateResponse>({
+      type: "SAVE_TRANSLATOR_SETTINGS_STATE",
       payload: {
-        settings: {
-          llmProvider:
-            llmProvider.value === "gemini"
-              ? "gemini"
-              : llmProvider.value === "claude"
-                ? "claude"
-                : "openai",
-          defaultTranslationProvider: defaultTranslationProvider.value === "llm" ? "llm" : "google",
-          learnerLanguageCode: learnerLanguageCode.value as TranslatorSettings["learnerLanguageCode"],
-          providerBaseUrl: providerBaseUrl.value,
-          providerModel: providerModel.value,
-          apiKey: providerApiKey.value,
-          llmDisplayMode:
-            llmDisplayMode.value === "sentence"
-              ? "sentence"
-              : llmDisplayMode.value === "english"
-                ? "english"
-                : "word",
-          cacheDurationValue: Number(cacheDurationValue.value),
-          cacheDurationUnit: cacheDurationUnit.value === "hours" ? "hours" : "minutes",
-          fallbackToGoogle: fallbackToGoogle.checked,
-        },
+        state: translatorSettingsState,
       },
     });
 
-    if (response.ok && response.settings) {
-      translatorSettings = response.settings;
+    if (response.ok && response.state) {
+      setTranslatorSettingsState(response.state);
       renderShell();
       renderAll();
     }
@@ -450,6 +628,16 @@ function renderShell() {
         <h2>${ui("optionsTranslationSettings")}</h2>
         <p class="muted">${ui("optionsTranslationDescription")}</p>
         <div class="rank-controls">
+          <div class="profile-toolbar">
+            <label class="muted" for="profileSelect">${ui("optionsActiveProfile")}</label>
+            <select id="profileSelect">${renderProfileOptionsMarkup()}</select>
+            <div class="profile-actions">
+              <button class="secondary" id="newProfileButton" type="button">${ui("optionsNewProfile")}</button>
+              <button class="secondary" id="duplicateProfileButton" type="button">${ui("optionsDuplicateProfile")}</button>
+              <button class="secondary" id="renameProfileButton" type="button">${ui("optionsRenameProfile")}</button>
+              <button class="secondary" id="deleteProfileButton" type="button"${translatorSettingsState.profiles.length <= 1 ? " disabled" : ""}>${ui("optionsDeleteProfile")}</button>
+            </div>
+          </div>
           <label class="muted" for="learnerLanguageCode">${ui("optionsLearnerLanguage")}</label>
           <select id="learnerLanguageCode">${renderLanguageOptionsMarkup()}</select>
           <label class="muted" for="defaultTranslationProvider">${ui("optionsDefaultTranslationProvider")}</label>
@@ -508,7 +696,7 @@ function renderShell() {
 
 async function boot() {
   settings = await getSettings();
-  translatorSettings = await getTranslatorSettings();
+  setTranslatorSettingsState(await getTranslatorSettingsState());
   renderShell();
   renderAll();
 }
