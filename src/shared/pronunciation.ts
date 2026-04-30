@@ -126,9 +126,9 @@ const CMUDICT_COMPLEX_ONSETS = new Set([
 ]);
 
 const CMUDICT_IPA_MAP = new Map<string, string>([
-  ["AA", "ɑ"],
+  ["AA", "ɑː"],
   ["AE", "æ"],
-  ["AO", "ɔ"],
+  ["AO", "ɔː"],
   ["AW", "aʊ"],
   ["AY", "aɪ"],
   ["B", "b"],
@@ -141,7 +141,7 @@ const CMUDICT_IPA_MAP = new Map<string, string>([
   ["G", "ɡ"],
   ["HH", "h"],
   ["IH", "ɪ"],
-  ["IY", "i"],
+  ["IY", "iː"],
   ["JH", "dʒ"],
   ["K", "k"],
   ["L", "l"],
@@ -157,7 +157,7 @@ const CMUDICT_IPA_MAP = new Map<string, string>([
   ["T", "t"],
   ["TH", "θ"],
   ["UH", "ʊ"],
-  ["UW", "u"],
+  ["UW", "uː"],
   ["V", "v"],
   ["W", "w"],
   ["Y", "j"],
@@ -269,6 +269,25 @@ function isEnglishVoice(voice: TtsVoiceLike): boolean {
   return lang.startsWith("en") || voiceName.includes("english");
 }
 
+export function convertIpaToDj(value: string | undefined): string | undefined {
+  const body = (value ?? "").trim().replace(/^\/+|\/+$/g, "");
+
+  if (!body) {
+    return undefined;
+  }
+
+  return body
+    .replace(/ɜː/g, "ə:")
+    .replace(/ɝ/g, "ə:r")
+    .replace(/ɚ/g, "ər")
+    .replace(/ː/g, ":")
+    .replace(/oʊ/g, "əʊ")
+    .replace(/eɪ/g, "ei")
+    .replace(/ɛ/g, "e")
+    .replace(/ɹ/g, "r")
+    .replace(/̬/g, "");
+}
+
 function normalizePhoneticText(value: string | undefined): string | undefined {
   const compact = (value ?? "").trim();
 
@@ -276,11 +295,9 @@ function normalizePhoneticText(value: string | undefined): string | undefined {
     return undefined;
   }
 
-  if (compact.startsWith("/") && compact.endsWith("/")) {
-    return compact;
-  }
+  const converted = convertIpaToDj(compact);
 
-  return `/${compact.replace(/^\/+|\/+$/g, "")}/`;
+  return converted ? `/${converted}/` : undefined;
 }
 
 function markerRegex(accent: PronunciationAccent): RegExp {

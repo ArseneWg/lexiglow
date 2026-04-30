@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   buildPronunciationCandidates,
+  convertIpaToDj,
   extractPronunciation,
   extractPronunciationFromCmudictText,
   extractPronunciationFromKaikkiJsonl,
@@ -140,8 +141,8 @@ describe("extractPronunciation", () => {
         ],
       }),
     ).toEqual({
-      ukPhonetic: "/kriˈeɪt/",
-      usPhonetic: "/kriˈeɪt̬/",
+      ukPhonetic: "/kriˈeit/",
+      usPhonetic: "/kriˈeit/",
       ukAudioUrl: "https://cdn.example.com/uk/create.mp3",
       usAudioUrl: "https://cdn.example.com/us/create.mp3",
     });
@@ -153,11 +154,19 @@ describe("extractPronunciation", () => {
         phonetic: "rɪˈsiːvd",
       }),
     ).toEqual({
-      ukPhonetic: "/rɪˈsiːvd/",
-      usPhonetic: "/rɪˈsiːvd/",
+      ukPhonetic: "/rɪˈsi:vd/",
+      usPhonetic: "/rɪˈsi:vd/",
       ukAudioUrl: undefined,
       usAudioUrl: undefined,
     });
+  });
+});
+
+describe("convertIpaToDj", () => {
+  test("normalizes common ipa symbols into dj-style display symbols", () => {
+    expect(convertIpaToDj("/həˈloʊ ɝ/")).toBe("həˈləʊ ə:r");
+    expect(convertIpaToDj("/kriˈeɪt̬/")).toBe("kriˈeit");
+    expect(convertIpaToDj("/kənˈfɪɡə(ɹ)/")).toBe("kənˈfɪɡə(r)");
   });
 });
 
@@ -184,8 +193,8 @@ describe("pronunciation lookup fallbacks", () => {
 * {{IPA|en|/kənˈfɪɡ(j)ɚ/|a=US,CA}}
 `),
     ).toEqual({
-      ukPhonetic: "/kənˈfɪɡə(ɹ)/",
-      usPhonetic: "/kənˈfɪɡ(j)ɚ/",
+      ukPhonetic: "/kənˈfɪɡə(r)/",
+      usPhonetic: "/kənˈfɪɡ(j)ər/",
       ukAudioUrl: "https://commons.wikimedia.org/wiki/Special:FilePath/LL-Q1860%20(eng)-Vealhurl-configure.wav",
       usAudioUrl: undefined,
     });
@@ -195,8 +204,8 @@ describe("pronunciation lookup fallbacks", () => {
     expect(
       extractPronunciationFromKaikkiJsonl(`{"sounds":[{"tags":["UK"],"ipa":"/kənˈfɪɡə(ɹ)/"},{"audio":"LL-Q1860 (eng)-Vealhurl-configure.wav","ogg_url":"https://upload.wikimedia.org/example/configure.ogg","mp3_url":"https://upload.wikimedia.org/example/configure.mp3"},{"tags":["Canada","US"],"ipa":"/kənˈfɪɡ(j)ɚ/"}]}`),
     ).toEqual({
-      ukPhonetic: "/kənˈfɪɡə(ɹ)/",
-      usPhonetic: "/kənˈfɪɡ(j)ɚ/",
+      ukPhonetic: "/kənˈfɪɡə(r)/",
+      usPhonetic: "/kənˈfɪɡ(j)ər/",
       ukAudioUrl: "https://upload.wikimedia.org/example/configure.mp3",
       usAudioUrl: "https://upload.wikimedia.org/example/configure.mp3",
     });
@@ -206,7 +215,7 @@ describe("pronunciation lookup fallbacks", () => {
     expect(
       extractPronunciationFromCmudictText("contextual K AA2 N T EH1 K S CH UW2 AH0 L", "contextual"),
     ).toEqual({
-      usPhonetic: "/ˌkɑnˈtɛksˌtʃuəl/",
+      usPhonetic: "/ˌkɑ:nˈteksˌtʃu:əl/",
     });
   });
 
@@ -245,8 +254,8 @@ describe("pronunciation lookup fallbacks", () => {
     const result = await lookupBestPronunciation("configured", fetchMock as unknown as typeof fetch);
 
     expect(result).toEqual({
-      ukPhonetic: "/kənˈfɪɡə(ɹ)/",
-      usPhonetic: "/kənˈfɪɡ(j)ɚ/",
+      ukPhonetic: "/kənˈfɪɡə(r)/",
+      usPhonetic: "/kənˈfɪɡ(j)ər/",
       ukAudioUrl: "https://commons.wikimedia.org/wiki/Special:FilePath/LL-Q1860%20(eng)-Vealhurl-configure.wav",
       usAudioUrl: undefined,
     });
@@ -283,7 +292,7 @@ describe("pronunciation lookup fallbacks", () => {
 
     expect(result).toEqual({
       ukPhonetic: undefined,
-      usPhonetic: "/ˌkɑnˈtɛksˌtʃuəl/",
+      usPhonetic: "/ˌkɑ:nˈteksˌtʃu:əl/",
       ukAudioUrl: undefined,
       usAudioUrl: "https://commons.wikimedia.org/wiki/Special:FilePath/LL-Q1860%20(eng)-Wodencafe-contextual.wav",
     });
