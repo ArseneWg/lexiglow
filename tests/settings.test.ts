@@ -3,16 +3,19 @@ import { describe, expect, test } from "vitest";
 import { lookupRank } from "../src/shared/lexicon";
 import {
   DEFAULT_SETTINGS,
+  clearLearningProgress,
   countTotalKnown,
   estimateLearnerLevel,
   looksLikeContextualSpecialTerm,
   looksLikeSpecialTerm,
   removeWordIgnored,
   resolveWordFlags,
+  sanitizeSettings,
   setWordIgnored,
   setWordMastered,
   setWordUnmastered,
   updateKnownBaseRank,
+  updateWordReviewTrigger,
 } from "../src/shared/settings";
 
 describe("settings resolution", () => {
@@ -96,6 +99,18 @@ describe("settings resolution", () => {
   test("clamps base rank updates", () => {
     const settings = updateKnownBaseRank(DEFAULT_SETTINGS, 15000);
     expect(settings.knownBaseRank).toBe(10000);
+  });
+
+  test("defaults single-word review trigger to double click", () => {
+    expect(sanitizeSettings({ knownBaseRank: 100 }).wordReviewTrigger).toBe("doubleClick");
+  });
+
+  test("preserves single-word review trigger when clearing learning progress", () => {
+    const settings = setWordMastered(updateWordReviewTrigger(DEFAULT_SETTINGS, "selection"), "cursor");
+    const cleared = clearLearningProgress(settings);
+
+    expect(cleared.wordReviewTrigger).toBe("selection");
+    expect(cleared.masteredOverrides).toEqual([]);
   });
 
   test("subtracts forced-unmastered base words from total known count", () => {

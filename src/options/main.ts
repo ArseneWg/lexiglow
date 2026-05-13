@@ -14,6 +14,7 @@ import {
   setWordMastered,
   setWordUnmastered,
   updateKnownBaseRank,
+  updateWordReviewTrigger,
 } from "../shared/settings";
 import { getSettings, getTranslatorSettingsState, saveSettings } from "../shared/storage";
 import {
@@ -56,6 +57,7 @@ let baseKnownCount!: HTMLElement;
 let totalKnownCount!: HTMLElement;
 let extraKnownCount!: HTMLElement;
 let ignoredCount!: HTMLElement;
+let wordReviewTrigger!: HTMLSelectElement;
 let searchInput!: HTMLInputElement;
 let searchResults!: HTMLElement;
 let profileSelect!: HTMLSelectElement;
@@ -74,6 +76,8 @@ let cacheDurationValue!: HTMLInputElement;
 let cacheDurationUnit!: HTMLSelectElement;
 let fallbackToGoogle!: HTMLInputElement;
 let saveTranslatorButton!: HTMLButtonElement;
+let settingsStatusEls!: HTMLElement[];
+let settingsStatusTimer: number | null = null;
 let masteredList!: HTMLElement;
 let ignoredList!: HTMLElement;
 let clearButton!: HTMLButtonElement;
@@ -181,6 +185,7 @@ function assignRefs() {
   totalKnownCount = document.querySelector<HTMLElement>("#totalKnownCount")!;
   extraKnownCount = document.querySelector<HTMLElement>("#extraKnownCount")!;
   ignoredCount = document.querySelector<HTMLElement>("#ignoredCount")!;
+  wordReviewTrigger = document.querySelector<HTMLSelectElement>("#wordReviewTrigger")!;
   searchInput = document.querySelector<HTMLInputElement>("#searchInput")!;
   searchResults = document.querySelector<HTMLElement>("#searchResults")!;
   profileSelect = document.querySelector<HTMLSelectElement>("#profileSelect")!;
@@ -199,6 +204,7 @@ function assignRefs() {
   cacheDurationUnit = document.querySelector<HTMLSelectElement>("#cacheDurationUnit")!;
   fallbackToGoogle = document.querySelector<HTMLInputElement>("#fallbackToGoogle")!;
   saveTranslatorButton = document.querySelector<HTMLButtonElement>("#saveTranslatorButton")!;
+  settingsStatusEls = [...document.querySelectorAll<HTMLElement>(".settings-status")];
   masteredList = document.querySelector<HTMLElement>("#masteredList")!;
   ignoredList = document.querySelector<HTMLElement>("#ignoredList")!;
   clearButton = document.querySelector<HTMLButtonElement>("#clearButton")!;
@@ -370,6 +376,7 @@ function renderAll() {
   totalKnownCount.textContent = String(countTotalKnown(settings));
   extraKnownCount.textContent = String(countExtraMastered(settings));
   ignoredCount.textContent = String(settings.ignoredWords.length);
+  wordReviewTrigger.value = settings.wordReviewTrigger;
   profileSelect.value = translatorSettingsState.activeProfileId;
   deleteProfileButton.disabled = translatorSettingsState.profiles.length <= 1;
   learnerLanguageCode.value = translatorSettings.learnerLanguageCode;
@@ -387,10 +394,53 @@ function renderAll() {
   renderIgnoredList();
 }
 
-async function persistSettings(nextSettings: UserSettings) {
+function formatStatusTime(): string {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function showSettingsStatus(kind: "pending" | "success" | "error", text: string, clearAfterMs = 0) {
+  if (settingsStatusTimer) {
+    window.clearTimeout(settingsStatusTimer);
+    settingsStatusTimer = null;
+  }
+
+  for (const element of settingsStatusEls) {
+    element.textContent = text;
+    element.dataset.kind = kind;
+  }
+
+  if (clearAfterMs > 0) {
+    settingsStatusTimer = window.setTimeout(() => {
+      for (const element of settingsStatusEls) {
+        element.textContent = "";
+        delete element.dataset.kind;
+      }
+      settingsStatusTimer = null;
+    }, clearAfterMs);
+  }
+}
+
+async function persistSettings(nextSettings: UserSettings, showStatus = false) {
   settings = nextSettings;
-  await saveSettings(settings);
-  renderAll();
+  try {
+    if (showStatus) {
+      showSettingsStatus("pending", ui("optionsSavePending"));
+    }
+    await saveSettings(settings);
+    renderAll();
+    if (showStatus) {
+      showSettingsStatus("success", ui("optionsSaveSuccess", { time: formatStatusTime() }), 2600);
+    }
+  } catch (error) {
+    if (showStatus) {
+      showSettingsStatus("error", ui("optionsSaveFailed", { time: formatStatusTime() }));
+    }
+    throw error;
+  }
 }
 
 function bindEvents() {
@@ -404,6 +454,13 @@ function bindEvents() {
 
   searchInput.addEventListener("input", () => {
     renderSearch();
+  });
+
+  wordReviewTrigger.addEventListener("change", async () => {
+    await persistSettings(updateWordReviewTrigger(
+      settings,
+      wordReviewTrigger.value === "selection" ? "selection" : "doubleClick",
+    ), true);
   });
 
   searchResults.addEventListener("click", async (event) => {
@@ -560,18 +617,29 @@ function bindEvents() {
 
   saveTranslatorButton.addEventListener("click", async () => {
     syncActiveProfileFromForm();
+    showSettingsStatus("pending", ui("optionsSavePending"));
+    saveTranslatorButton.disabled = true;
 
-    const response = await runtimeSend<TranslatorSettingsStateResponse>({
-      type: "SAVE_TRANSLATOR_SETTINGS_STATE",
-      payload: {
-        state: translatorSettingsState,
-      },
-    });
+    try {
+      const response = await runtimeSend<TranslatorSettingsStateResponse>({
+        type: "SAVE_TRANSLATOR_SETTINGS_STATE",
+        payload: {
+          state: translatorSettingsState,
+        },
+      });
 
-    if (response.ok && response.state) {
-      setTranslatorSettingsState(response.state);
-      renderShell();
-      renderAll();
+      if (response.ok && response.state) {
+        setTranslatorSettingsState(response.state);
+        renderShell();
+        renderAll();
+        showSettingsStatus("success", ui("optionsSaveSuccess", { time: formatStatusTime() }), 2600);
+      } else {
+        showSettingsStatus("error", ui("optionsSaveFailed", { time: formatStatusTime() }));
+      }
+    } catch {
+      showSettingsStatus("error", ui("optionsSaveFailed", { time: formatStatusTime() }));
+    } finally {
+      saveTranslatorButton.disabled = false;
     }
   });
 
@@ -620,6 +688,13 @@ function renderShell() {
       </section>
       <section class="panel">
         <h2>${ui("optionsSearchManageWords")}</h2>
+        <label class="muted" for="wordReviewTrigger">${ui("optionsWordReviewTrigger")}</label>
+        <select id="wordReviewTrigger">
+          <option value="doubleClick">${ui("optionsWordReviewTriggerDoubleClick")}</option>
+          <option value="selection">${ui("optionsWordReviewTriggerSelection")}</option>
+        </select>
+        <p class="muted">${ui("optionsWordReviewTriggerDescription")}</p>
+        <p class="settings-status" role="status" aria-live="polite"></p>
         <input id="searchInput" type="search" placeholder="${ui("optionsSearchPlaceholder")}" />
         <p class="muted">${ui("optionsSearchDescription")}</p>
         <div class="search-results" id="searchResults"></div>
@@ -670,6 +745,7 @@ function renderShell() {
           <div class="word-actions">
             <button class="primary" id="saveTranslatorButton">${ui("optionsSaveTranslationSettings")}</button>
           </div>
+          <p class="settings-status" role="status" aria-live="polite"></p>
         </div>
       </section>
       <section class="grid">

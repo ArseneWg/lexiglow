@@ -190,6 +190,25 @@ select {
   font-weight: 600;
 }
 
+.settings-status {
+  min-height: 20px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-status[data-kind="pending"] {
+  color: #6b7280;
+}
+
+.settings-status[data-kind="success"] {
+  color: #0f766e;
+}
+
+.settings-status[data-kind="error"] {
+  color: #991b1b;
+}
+
 button {
   border: 0;
   border-radius: 999px;

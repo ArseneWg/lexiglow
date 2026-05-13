@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   masteredOverrides: [],
   unmasteredOverrides: [],
   ignoredWords: [],
+  wordReviewTrigger: "doubleClick",
 };
 
 const PINYIN_INITIALS = [
@@ -220,6 +221,7 @@ export function sanitizeSettings(input?: Partial<UserSettings> | null): UserSett
   const knownBaseRank = clampKnownBaseRank(input?.knownBaseRank ?? DEFAULT_KNOWN_BASE_RANK);
   const ignoredWords = uniqueNormalizedWords(input?.ignoredWords ?? []);
   const ignoredSet = new Set(ignoredWords);
+  const wordReviewTrigger = input?.wordReviewTrigger === "selection" ? "selection" : "doubleClick";
 
   const masteredOverrides = uniqueNormalizedWords(input?.masteredOverrides ?? []).filter(
     (word) => !ignoredSet.has(word),
@@ -233,6 +235,7 @@ export function sanitizeSettings(input?: Partial<UserSettings> | null): UserSett
     masteredOverrides,
     unmasteredOverrides,
     ignoredWords,
+    wordReviewTrigger,
   };
 }
 
@@ -380,12 +383,23 @@ export function updateKnownBaseRank(settings: UserSettings, knownBaseRank: numbe
   });
 }
 
+export function updateWordReviewTrigger(
+  settings: UserSettings,
+  wordReviewTrigger: UserSettings["wordReviewTrigger"],
+): UserSettings {
+  return sanitizeSettings({
+    ...settings,
+    wordReviewTrigger,
+  });
+}
+
 export function clearLearningProgress(settings: UserSettings): UserSettings {
   return sanitizeSettings({
     knownBaseRank: settings.knownBaseRank,
     masteredOverrides: [],
     unmasteredOverrides: [],
     ignoredWords: [],
+    wordReviewTrigger: settings.wordReviewTrigger,
   });
 }
 

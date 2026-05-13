@@ -3,6 +3,7 @@ export interface UserSettings {
   masteredOverrides: string[];
   unmasteredOverrides: string[];
   ignoredWords: string[];
+  wordReviewTrigger: "doubleClick" | "selection";
 }
 
 export type SupportedLearnerLanguageCode =

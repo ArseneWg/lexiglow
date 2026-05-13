@@ -1,4 +1,4 @@
-import { STORAGE_TRANSLATOR_SETTINGS_KEY } from "../shared/constants";
+import { STORAGE_SETTINGS_KEY, STORAGE_TRANSLATOR_SETTINGS_KEY } from "../shared/constants";
 import { t } from "../shared/i18n";
 import { lookupRank, resolveLookupLemma } from "../shared/lexicon";
 import {
@@ -14,7 +14,7 @@ import type {
   SettingsResponse,
   TranslationProviderChoice,
 } from "../shared/messages";
-import { DEFAULT_SETTINGS, looksLikeContextualSpecialTerm, resolveWordFlags } from "../shared/settings";
+import { DEFAULT_SETTINGS, looksLikeContextualSpecialTerm, resolveWordFlags, sanitizeSettings } from "../shared/settings";
 import { getSettings, getTranslatorSettings } from "../shared/storage";
 import {
   countEnglishWords,
@@ -2210,6 +2210,11 @@ function createTooltipRoot() {
   ignoreButton.className = "wordwise-button wordwise-button--secondary";
   ignoreButton.textContent = ui("tooltipIgnore");
 
+  const reviewButton = document.createElement("button");
+  reviewButton.className = "wordwise-button";
+  reviewButton.textContent = ui("tooltipReview");
+  reviewButton.title = ui("tooltipReviewTitle");
+
   const metaEl = document.createElement("div");
   metaEl.className = "wordwise-meta";
 
@@ -2370,7 +2375,7 @@ function createTooltipRoot() {
     englishExplanationEl,
     metaEl,
   );
-  actionsEl.append(actionIndicatorEl, llmButton, selectionAnalysisButton, ignoreButton, button);
+  actionsEl.append(actionIndicatorEl, llmButton, selectionAnalysisButton, reviewButton, ignoreButton, button);
   metaEl.append(hintEl, metaDividerEl, rankEl);
   wordView.append(surfaceHeaderEl, pronunciationEl, translationEl, actionsEl);
   analysisHeader.append(analysisTitleEl, analysisTriggerButton);
@@ -2420,6 +2425,7 @@ function createTooltipRoot() {
     americanButton,
     selectionAnalysisButton,
     ignoreButton,
+    reviewButton,
     analysisTitleEl,
     analysisTriggerButton,
     analysisStatusEl,
@@ -2497,6 +2503,10 @@ function getSelectedWordContext(pointer?: { clientX: number; clientY: number }):
   }
 
   if (!surface || !isSingleEnglishWord(surface)) {
+    return null;
+  }
+
+  if (shouldIgnoreSelectionRange(range)) {
     return null;
   }
 
@@ -2807,6 +2817,8 @@ function applyTooltipLocale() {
   tooltip.americanButton.setAttribute("aria-label", ui("tooltipPlayUsPronunciation"));
   tooltip.selectionAnalysisButton.textContent = ui("tooltipSentenceAnalysis");
   tooltip.ignoreButton.textContent = ui("tooltipIgnore");
+  tooltip.reviewButton.textContent = ui("tooltipReview");
+  tooltip.reviewButton.title = ui("tooltipReviewTitle");
   tooltip.button.textContent = ui("tooltipKnown");
   tooltip.button.title = ui("tooltipKnownTitle");
   tooltip.englishExplanationLabelEl.textContent = ui("tooltipEnglishExplanation");
@@ -2874,7 +2886,7 @@ function stopActivePronunciationAudio() {
 
 function isPersistentTooltipSession(): boolean {
   return tooltip.host.style.display === "block" &&
-    (activeWordTooltipSource === "selection-translate" || analysisPanelOpen);
+    (activeWordTooltipSource === "review-word" || activeWordTooltipSource === "selection-translate" || analysisPanelOpen);
 }
 
 function hideTooltip() {
@@ -2940,6 +2952,10 @@ function getDefaultActionIndicatorTarget(): HTMLButtonElement | null {
     if (tooltip.llmButton.style.display !== "none") {
       return tooltip.llmButton;
     }
+  }
+
+  if (tooltip.reviewButton.style.display !== "none") {
+    return tooltip.reviewButton;
   }
 
   if (tooltip.button.style.display !== "none") {
@@ -3146,16 +3162,18 @@ function positionSentenceAnalysisPanel(rect: DOMRect) {
 
 function setWordTooltipControls(mode: "word" | "selection") {
   const isSelection = mode === "selection";
+  const isReviewPrompt = mode === "word" && Boolean(activeContext?.forceTranslate);
   tooltip.card.dataset.layout = mode;
   tooltip.wordView.dataset.layout = mode;
-  tooltip.button.style.display = isSelection ? "none" : "inline-flex";
+  tooltip.button.style.display = isSelection || isReviewPrompt ? "none" : "inline-flex";
+  tooltip.reviewButton.style.display = isReviewPrompt ? "inline-flex" : "none";
   tooltip.ignoreButton.style.display = isSelection ? "none" : "inline-flex";
   tooltip.metaEl.style.display = "flex";
   tooltip.rankEl.style.display = isSelection ? "none" : "inline";
   tooltip.llmButton.style.display = "inline-flex";
   tooltip.pronunciationEl.dataset.visible = isSelection ? "false" : "true";
   tooltip.surfaceHeaderEl.style.display = isSelection ? "none" : "flex";
-  tooltip.closeButton.dataset.visible = isSelection ? "true" : "false";
+  tooltip.closeButton.dataset.visible = isSelection || isReviewPrompt ? "true" : "false";
   tooltip.britishButton.dataset.playing = "false";
   tooltip.americanButton.dataset.playing = "false";
   tooltip.selectionAnalysisButton.style.display = isSelection ? "inline-flex" : "none";
@@ -3560,7 +3578,7 @@ function scheduleSelectionTriggerUpdate(delayMs = 0) {
   clearSelectionTriggerTimer();
   selectionTriggerTimer = window.setTimeout(() => {
     selectionTriggerTimer = null;
-    updateSelectionAnalysisTrigger();
+    void updateSelectionAnalysisTrigger();
   }, delayMs);
 }
 
@@ -3617,7 +3635,7 @@ async function resolveHoverWord(context: HoverContext) {
     return;
   }
 
-  if (!response.result.shouldTranslate) {
+  if (!response.result.shouldTranslate && !context.forceTranslate) {
     hideTooltip();
     return;
   }
@@ -4038,8 +4056,17 @@ function getHoverContext(clientX: number, clientY: number): HoverContext | null 
   };
 }
 
-function updateSelectionAnalysisTrigger() {
+async function updateSelectionAnalysisTrigger() {
   if (Date.now() < suppressSelectionTriggerUntil) {
+    return;
+  }
+
+  const settings = await ensureSettings();
+  const selectedWordContext = settings.wordReviewTrigger === "selection" ? getSelectedWordContext() : null;
+
+  if (selectedWordContext) {
+    hideSentenceAnalysis();
+    void resolveHoverWord(selectedWordContext);
     return;
   }
 
@@ -4093,7 +4120,7 @@ tooltip.analysisTriggerButton.addEventListener("click", async () => {
   await requestSentenceAnalysis(activeSelectionContext);
 });
 
-[tooltip.llmButton, tooltip.selectionAnalysisButton, tooltip.ignoreButton, tooltip.button].forEach((actionButton) => {
+[tooltip.llmButton, tooltip.selectionAnalysisButton, tooltip.reviewButton, tooltip.ignoreButton, tooltip.button].forEach((actionButton) => {
   actionButton.addEventListener("mouseenter", () => {
     syncActionIndicator(actionButton);
   });
@@ -4121,6 +4148,21 @@ tooltip.selectionAnalysisButton.addEventListener("click", async () => {
   suppressSelectionTriggerUntil = Date.now() + 1500;
   cancelActiveAsyncRequests();
   await requestSentenceAnalysis(activeSelectionContext);
+});
+
+tooltip.reviewButton.addEventListener("click", async () => {
+  if (!activeResult?.surface) {
+    return;
+  }
+
+  const changed = await markWordForReview(activeResult.surface);
+
+  if (!changed) {
+    return;
+  }
+
+  activeRequestId += 1;
+  hideTooltip();
 });
 
 tooltip.button.addEventListener("click", async () => {
@@ -4271,7 +4313,14 @@ document.addEventListener("mouseup", (event) => {
   pointerSelecting = false;
 
   if (event.detail === 2) {
-    suppressSelectionTriggerUntil = Date.now() + 500;
+    void ensureSettings().then((settings) => {
+      if (settings.wordReviewTrigger === "selection") {
+        scheduleSelectionTriggerUpdate();
+        return;
+      }
+
+      suppressSelectionTriggerUntil = Date.now() + 500;
+    });
     return;
   }
 
@@ -4314,25 +4363,25 @@ window.addEventListener("pointerup", () => {
 
 document.addEventListener("dblclick", (event) => {
   window.setTimeout(() => {
-    const context = getSelectedWordContext({
-      clientX: event.clientX,
-      clientY: event.clientY,
-    });
-
-    if (!context) {
-      return;
-    }
-
     void (async () => {
-      const changed = await markWordForReview(context.surface);
+      const settings = await ensureSettings();
 
-      if (!changed) {
+      if (settings.wordReviewTrigger !== "doubleClick") {
+        scheduleSelectionTriggerUpdate();
+        return;
+      }
+
+      const context = getSelectedWordContext({
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+
+      if (!context) {
         return;
       }
 
       window.getSelection()?.removeAllRanges();
-
-      await resolveHoverWord(context);
+      void resolveHoverWord(context);
     })();
   }, 0);
 });
@@ -4410,11 +4459,11 @@ document.addEventListener("keydown", (event) => {
 });
 
 globalThis.chrome?.storage?.onChanged?.addListener?.((changes, areaName) => {
-  if ((areaName !== "sync" && areaName !== "local") || !changes.userSettings) {
+  if ((areaName !== "sync" && areaName !== "local") || !(STORAGE_SETTINGS_KEY in changes)) {
     return;
   }
 
-  currentSettings = (changes.userSettings.newValue as UserSettings | undefined) ?? DEFAULT_SETTINGS;
+  currentSettings = sanitizeSettings(changes[STORAGE_SETTINGS_KEY].newValue as Partial<UserSettings> | undefined);
   scheduleHighlightRefresh();
 });
 
