@@ -4,9 +4,18 @@ export interface WordAtOffset {
   end: number;
 }
 
-const ENGLISH_TOKEN_SOURCE = "[A-Za-z]+(?:['’][A-Za-z]+)?";
+const ENGLISH_ATOM_SOURCE = "[A-Za-z]+(?:['’][A-Za-z]+)?";
+const ENGLISH_TOKEN_SOURCE = `${ENGLISH_ATOM_SOURCE}(?:-${ENGLISH_ATOM_SOURCE})*`;
 const ENGLISH_WORD_RE = new RegExp(`^${ENGLISH_TOKEN_SOURCE}$`);
-const MAX_SELECTION_TEXT_LENGTH = 1200;
+export const MAX_SELECTION_TEXT_LENGTH = 1200;
+
+export type EnglishSelectionValidation =
+  | "ok"
+  | "empty"
+  | "tooLong"
+  | "containsCjk"
+  | "notEnglish"
+  | "technical";
 
 export function createEnglishTokenMatcher(): RegExp {
   return new RegExp(ENGLISH_TOKEN_SOURCE, "g");
@@ -51,10 +60,7 @@ function isHyphenLinkedToTechnicalToken(text: string, start: number, end: number
 }
 
 function isDotEmbeddedInTechnicalToken(text: string, start: number, end: number): boolean {
-  return (
-    text[start - 1] === "." ||
-    (text[end] === "." && isAlphaNumeric(text[end + 1]))
-  );
+  return text[start - 1] === "." || (text[end] === "." && isAlphaNumeric(text[end + 1]));
 }
 
 function isUrlSchemeBoundary(text: string, start: number, end: number): boolean {
@@ -100,7 +106,6 @@ function isLikelyHandleOrTagOnlySelection(text: string): boolean {
   }
 
   const stripped = compact.replace(/[()[\]{}"'’`.,!?;:]+/g, " ").replace(/\s+/g, " ").trim();
-
   if (!stripped) {
     return false;
   }
@@ -121,26 +126,31 @@ export function countEnglishWords(text: string): number {
   return normalizeSelectionText(text).match(matcher)?.length ?? 0;
 }
 
-export function isEnglishSelectionText(text: string): boolean {
+export function validateEnglishSelectionText(text: string): EnglishSelectionValidation {
   const compact = normalizeSelectionText(text);
-
-  if (!compact || compact.length > MAX_SELECTION_TEXT_LENGTH || /[\u4e00-\u9fff]/u.test(compact)) {
-    return false;
+  if (!compact) {
+    return "empty";
   }
-
+  if (compact.length > MAX_SELECTION_TEXT_LENGTH) {
+    return "tooLong";
+  }
+  if (/[\u4e00-\u9fff]/u.test(compact)) {
+    return "containsCjk";
+  }
   if (isLikelyHandleOrTagOnlySelection(compact)) {
-    return false;
+    return "technical";
   }
-
-  if (!/[A-Za-z]+(?:['’][A-Za-z]+)?/.test(compact)) {
-    return false;
+  if (!new RegExp(ENGLISH_TOKEN_SOURCE).test(compact)) {
+    return "notEnglish";
   }
-
   if (isLikelyTechnicalToken(compact)) {
-    return false;
+    return "technical";
   }
+  return "ok";
+}
 
-  return true;
+export function isEnglishSelectionText(text: string): boolean {
+  return validateEnglishSelectionText(text) === "ok";
 }
 
 export function extractWordAtOffset(text: string, offset: number): WordAtOffset | null {
