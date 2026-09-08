@@ -4,6 +4,14 @@ import { lookupRank, resolveLookupLemma } from "../shared/lexicon";
 import { findLearningPhraseAtOffset } from "../shared/phrases";
 import { createIncrementalHighlightEngine, PENDING_HIGHLIGHT_NAMES } from "./highlightEngine";
 import {
+  createTooltipSession,
+  HIDDEN_TOOLTIP_SESSION,
+  isAnalysisTooltipSession,
+  isPersistentTooltipSessionState,
+  isSelectionTooltipSession,
+  shouldPreserveAnalysisContextOnHide,
+} from "./tooltipSession";
+import {
   getDisplayClauseBlocks,
 } from "../shared/sentenceAnalysisDisplay";
 import type {
@@ -2869,11 +2877,10 @@ let activeSelectionTooltipContext: SelectedTextContext | null = null;
 let activeSelectionTranslationRequestId = 0;
 let activeSelectionContext: SentenceSelectionContext | null = null;
 let selectionRequestId = 0;
-let analysisPanelOpen = false;
+let tooltipSession = HIDDEN_TOOLTIP_SESSION;
 let activeSentenceAnalysisRequestId = 0;
 let suppressSelectionTriggerUntil = 0;
 let pointerSelecting = false;
-let activeWordTooltipSource: "hover-word" | "review-word" | "selection-translate" = "hover-word";
 let activePronunciationSurface = "";
 let activePronunciationRequestId = 0;
 let activePronunciationResult: PronunciationResult | null = null;
@@ -2890,11 +2897,11 @@ function stopActivePronunciationAudio() {
 }
 
 function isPersistentTooltipSession(): boolean {
-  return tooltip.host.style.display === "block" &&
-    (activeWordTooltipSource === "review-word" || activeWordTooltipSource === "selection-translate" || analysisPanelOpen);
+  return tooltip.host.style.display === "block" && isPersistentTooltipSessionState(tooltipSession);
 }
 
 function hideTooltip() {
+  const preserveAnalysisContext = shouldPreserveAnalysisContextOnHide(tooltipSession);
   stopActivePronunciationAudio();
   clearSelectionTriggerTimer();
   tooltip.host.style.display = "none";
@@ -2914,9 +2921,9 @@ function hideTooltip() {
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
   activePronunciationResult = null;
-  activeWordTooltipSource = "hover-word";
+  tooltipSession = HIDDEN_TOOLTIP_SESSION;
   activeDisplayedTranslationProvider = currentDefaultTranslationProvider;
-  if (!analysisPanelOpen) {
+  if (!preserveAnalysisContext) {
     activeSelectionContext = null;
   }
 }
@@ -3149,7 +3156,9 @@ function hideSentenceAnalysis(options?: { preservePanel?: boolean }) {
     tooltip.analysisStructureEl.textContent = "";
     tooltip.analysisStepsEl.innerHTML = "";
     tooltip.analysisTriggerButton.style.display = "none";
-    analysisPanelOpen = false;
+    if (isAnalysisTooltipSession(tooltipSession)) {
+      tooltipSession = HIDDEN_TOOLTIP_SESSION;
+    }
     activeSelectionContext = null;
   }
 
@@ -3230,7 +3239,7 @@ async function loadPronunciation(surface: string) {
   if (
     !response.ok ||
     requestId !== activePronunciationRequestId ||
-    activeWordTooltipSource === "selection-translate" ||
+    isSelectionTooltipSession(tooltipSession) ||
     activePronunciationSurface !== normalizedSurface
   ) {
     return;
@@ -3285,13 +3294,12 @@ function renderSelectionTooltip(
   activeAnchorRect = context.rect;
   activeSelectionTooltipContext = context;
   activeSelectionContext = context;
-  activeWordTooltipSource = "selection-translate";
+  tooltipSession = createTooltipSession("selection");
   setDisplayedTranslationProvider(displayedProvider);
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
   activeContext = null;
   activeResult = null;
-  analysisPanelOpen = false;
   positionTooltip(context.rect);
 }
 
@@ -3315,7 +3323,7 @@ function showSentenceAnalysisButton(context: SentenceSelectionContext) {
   tooltip.analysisStructureEl.textContent = "";
   tooltip.analysisStepsEl.innerHTML = "";
   tooltip.host.style.display = "block";
-  analysisPanelOpen = false;
+  tooltipSession = createTooltipSession("analysisPrompt");
   positionSentenceAnalysisButton(context.rect);
 }
 
@@ -3409,7 +3417,7 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.host.style.display = "block";
   activeAnchorRect = rect;
   activeSelectionTooltipContext = null;
-  activeWordTooltipSource = activeContext?.forceTranslate ? "review-word" : "hover-word";
+  tooltipSession = createTooltipSession(activeContext?.forceTranslate ? "reviewWord" : "hoverWord");
   positionTooltip(rect);
   activeResult = result;
   if (activePronunciationSurface !== result.surface) {
@@ -3438,7 +3446,7 @@ function renderSentenceAnalysisPanel(
   tooltip.analysisStructureEl.textContent = result.structure;
   tooltip.analysisStepsEl.innerHTML = renderAnalysisStepsMarkup(result.analysisSteps);
   tooltip.host.style.display = "block";
-  analysisPanelOpen = true;
+  tooltipSession = createTooltipSession("analysis");
   positionSentenceAnalysisPanel(context.rect);
   requestAnimationFrame(() => {
     if (tooltip.analysisView.dataset.visible === "true") {
@@ -3767,7 +3775,7 @@ async function playPronunciationAudio(
 }
 
 async function speakPronunciation(accent: PronunciationAccent) {
-  if (!activeResult?.surface || activeWordTooltipSource === "selection-translate") {
+  if (!activeResult?.surface || isSelectionTooltipSession(tooltipSession)) {
     return;
   }
 
@@ -3834,7 +3842,7 @@ async function requestSentenceAnalysis(context: SentenceSelectionContext) {
   tooltip.analysisStructureEl.textContent = "";
   tooltip.analysisStepsEl.innerHTML = "";
   tooltip.host.style.display = "block";
-  analysisPanelOpen = true;
+  tooltipSession = createTooltipSession("analysis");
   positionSentenceAnalysisPanel(context.rect);
   await waitForPaint();
 
@@ -4009,7 +4017,7 @@ async function updateSelectionAnalysisTrigger() {
   const context = getSelectedTextContext();
 
   if (!context) {
-    const hadAnalysisOpen = analysisPanelOpen;
+    const hadAnalysisOpen = isAnalysisTooltipSession(tooltipSession);
     const hadSelectionOpen = Boolean(activeSelectionTooltipContext);
     hideSentenceAnalysis();
     if (hadAnalysisOpen || hadSelectionOpen) {
@@ -4339,7 +4347,7 @@ window.addEventListener("resize", () => {
     positionTooltip(activeSelectionTooltipContext.rect);
   }
 
-  if (analysisPanelOpen && activeSelectionContext) {
+  if (tooltipSession.kind === "analysis" && activeSelectionContext) {
     positionSentenceAnalysisPanel(activeSelectionContext.rect);
   } else if (activeSelectionContext) {
     positionSentenceAnalysisButton(activeSelectionContext.rect);
