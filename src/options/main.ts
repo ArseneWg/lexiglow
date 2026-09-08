@@ -2,6 +2,13 @@ import "./styles.css";
 
 import { t } from "../shared/i18n";
 import { LEXICON_WORDS, lookupRank, resolveLookupLemma } from "../shared/lexicon";
+import {
+  createLearningDataExport,
+  MAX_LEARNING_DATA_IMPORT_BYTES,
+  mergeImportedTranslatorSecrets,
+  parseLearningDataExport,
+  serializeLearningDataExport,
+} from "../shared/learningData";
 import type { RuntimeMessage, TranslatorSettingsStateResponse } from "../shared/messages";
 import {
   clearLearningProgress,
@@ -16,7 +23,12 @@ import {
   updateKnownBaseRank,
   updateWordReviewTrigger,
 } from "../shared/settings";
-import { getSettings, getTranslatorSettingsState, saveSettings } from "../shared/storage";
+import {
+  getSettings,
+  getTranslatorSettingsState,
+  saveSettings,
+  saveTranslatorSettingsState,
+} from "../shared/storage";
 import {
   DEFAULT_TRANSLATOR_PROFILE,
   DEFAULT_TRANSLATOR_SETTINGS,
@@ -80,6 +92,9 @@ let settingsStatusEls!: HTMLElement[];
 let settingsStatusTimer: number | null = null;
 let masteredList!: HTMLElement;
 let ignoredList!: HTMLElement;
+let exportDataButton!: HTMLButtonElement;
+let importDataButton!: HTMLButtonElement;
+let importDataInput!: HTMLInputElement;
 let clearButton!: HTMLButtonElement;
 
 function ui(key: Parameters<typeof t>[1], variables?: Record<string, string | number>): string {
@@ -207,6 +222,9 @@ function assignRefs() {
   settingsStatusEls = [...document.querySelectorAll<HTMLElement>(".settings-status")];
   masteredList = document.querySelector<HTMLElement>("#masteredList")!;
   ignoredList = document.querySelector<HTMLElement>("#ignoredList")!;
+  exportDataButton = document.querySelector<HTMLButtonElement>("#exportDataButton")!;
+  importDataButton = document.querySelector<HTMLButtonElement>("#importDataButton")!;
+  importDataInput = document.querySelector<HTMLInputElement>("#importDataInput")!;
   clearButton = document.querySelector<HTMLButtonElement>("#clearButton")!;
 }
 
@@ -443,6 +461,35 @@ async function persistSettings(nextSettings: UserSettings, showStatus = false) {
   }
 }
 
+function downloadLearningDataExport() {
+  const bundle = createLearningDataExport(settings, translatorSettingsState);
+  const blob = new Blob([serializeLearningDataExport(bundle)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const date = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `lexiglow-learning-data-${date}.json`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  showSettingsStatus("success", ui("optionsExportDataSuccess"), 2600);
+}
+
+async function importLearningDataFile(file: File) {
+  if (file.size > MAX_LEARNING_DATA_IMPORT_BYTES) {
+    throw new Error("Learning data file is too large.");
+  }
+
+  const parsed = parseLearningDataExport(await file.text());
+  const nextTranslatorState = mergeImportedTranslatorSecrets(parsed.translatorSettingsState, translatorSettingsState);
+  await saveSettings(parsed.userSettings);
+  await saveTranslatorSettingsState(nextTranslatorState);
+  settings = await getSettings();
+  setTranslatorSettingsState(await getTranslatorSettingsState());
+  renderShell();
+  renderAll();
+  showSettingsStatus("success", ui("optionsImportDataSuccess"), 3200);
+}
+
 function bindEvents() {
   rankRange.addEventListener("input", async () => {
     await persistSettings(updateKnownBaseRank(settings, Number(rankRange.value)));
@@ -511,6 +558,26 @@ function bindEvents() {
     const row = target.closest<HTMLElement>("[data-ignored]");
     const lemma = row?.dataset.ignored ?? "";
     await persistSettings(removeWordIgnored(settings, lemma));
+  });
+
+  exportDataButton.addEventListener("click", () => {
+    downloadLearningDataExport();
+  });
+
+  importDataButton.addEventListener("click", () => {
+    importDataInput.value = "";
+    importDataInput.click();
+  });
+
+  importDataInput.addEventListener("change", async () => {
+    const file = importDataInput.files?.[0];
+    if (!file) return;
+    showSettingsStatus("pending", ui("optionsImportDataPending"));
+    try {
+      await importLearningDataFile(file);
+    } catch {
+      showSettingsStatus("error", ui("optionsImportDataFailed"));
+    }
   });
 
   clearButton.addEventListener("click", async () => {
@@ -757,6 +824,17 @@ function renderShell() {
           <h2>${ui("optionsIgnoredWordsHeading")}</h2>
           <div class="tag-list" id="ignoredList"></div>
         </section>
+      </section>
+      <section class="panel">
+        <h2>${ui("optionsDataBackup")}</h2>
+        <p class="muted">${ui("optionsDataBackupDescription")}</p>
+        <p class="muted">${ui("optionsDataBackupNoSecrets")}</p>
+        <div class="word-actions">
+          <button class="primary" id="exportDataButton" type="button">${ui("optionsExportData")}</button>
+          <button class="secondary" id="importDataButton" type="button">${ui("optionsImportData")}</button>
+          <input id="importDataInput" type="file" accept="application/json,.json" hidden />
+        </div>
+        <p class="settings-status" role="status" aria-live="polite"></p>
       </section>
       <section class="panel">
         <h2>${ui("optionsReset")}</h2>

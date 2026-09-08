@@ -1,5 +1,5 @@
 {
-  "name": "wordwise-hover-translator",
+  "name": "lexiglow",
   "version": "0.1.0",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
@@ -9,14 +9,20 @@
     "dev": "node scripts/build-extension.mjs",
     "fetch:lexicon": "node scripts/fetch-lexicon.mjs",
     "prepare:lexicon": "node scripts/build-lexicon.mjs",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:network": "playwright test e2e/network-resilience.spec.ts",
+    "release:package": "node scripts/package-release.mjs",
+    "test:e2e:sites": "playwright test --config=playwright.sites.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/chrome": "^0.1.24",
     "@types/node": "^24.6.0",
-    "esbuild": "^0.27.4",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.3",
-    "vite": "^7.1.7",
-    "vitest": "^3.2.4"
+    "vite": "^7.3.6",
+    "vitest": "^4.1.11"
   }
 }

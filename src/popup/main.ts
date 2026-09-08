@@ -51,7 +51,7 @@ function renderShell() {
   appRoot.innerHTML = `
     <main class="panel">
       <section class="hero">
-        <h1>WordWise</h1>
+        <h1>LexiGlow</h1>
         <p>${ui("popupHeroDescription")}</p>
       </section>
       <section class="stats">

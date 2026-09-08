@@ -1,6 +1,7 @@
 import { t } from "./i18n";
 import { lookupRank, resolveLookupLemma } from "./lexicon";
 import { countTotalKnown, estimateLearnerLevel, resolveWordFlags } from "./settings";
+import { createEnglishTokenMatcher } from "./word";
 import type {
   EnglishExplanationResult,
   LearnerLevelBand,
@@ -85,7 +86,7 @@ const LLM_PROVIDER_DEFAULTS = {
 
 const WORD_TRANSLATION_REQUEST_TIMEOUT_MS = 8000;
 const SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS = 10000;
-const SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 20000;
+const SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 25000;
 const PRESERVE_PROPER_NAMES_INSTRUCTION =
   "Keep person names, usernames, brand names, and product names in their original English form instead of translating or transliterating them.";
 
@@ -205,19 +206,19 @@ function buildSentenceAnalysisPrompt(settings: TranslatorSettings): string {
     "",
     "Field requirements:",
     `1. translation: output one polished ${meaningLanguage} sentence for the whole English sentence. It must be faithful, precise, natural, and suitable for technical reading. Do not translate word by word. Prefer established wording when appropriate.`,
-    "2. structure: output one short English backbone sentence with branches removed. Keep only the clause skeleton, not a learner-language explanation. Do not copy the whole original sentence. Do not include sentence-opening adverbs such as presently or currently. Do not keep long modifier chains, relative clauses, subordinate clauses, participial branches, or prepositional detail that is not part of the skeleton. Keep only backbone subject + predicate + object/complement, or at most two backbone clauses if there is true top-level coordination. Keep each backbone clause within about 200 English words. If structure is close to the full sentence, it is wrong.",
+    "2. structure: output one short English backbone sentence with branches removed. Keep only the clause skeleton, not a learner-language explanation. Do not copy the whole original sentence. Do not include sentence-opening adverbs such as presently or currently. Do not keep long modifier chains, relative clauses, subordinate clauses, participial branches, or prepositional detail that is not part of the skeleton. Keep only backbone subject + predicate + object/complement, or at most two backbone clauses if there is true top-level coordination. Keep each backbone clause within about 20 English words. If structure is close to the full sentence, it is wrong.",
     `3. analysisSteps: output exactly 4 ${meaningLanguage} sentences in this order:`,
     "   Step 1: cut the sentence into layers by connectors, punctuation, clauses, coordination, and nonfinite structures.",
     "   Step 2: identify the main clause subject, predicate, object or complement, and state the core meaning.",
     "   Step 3: explain logical groups, clauses, nonfinite phrases, modifiers, and what each part modifies.",
     "   Step 4: explain the learner-language translation order first and then support the final translation.",
     "   Keep each analysis step concise and review-friendly.",
-    "4. highlights: output 5 to 8 strings in the format <category>|||<exact single word from sentence>. Allowed categories are [subject, predicate, nonfinite, conjunction, relative, preposition]. Choose structural signal words rather than ordinary content words. For medium or long sentences, prefer 6 to 8 highlights when possible. Each highlight must use the category that best matches the word's grammatical role in this sentence.",
+    "4. highlights: output 3 to 8 JSON objects shaped {category,text,tokenIndex}. tokenIndex is the zero-based index from the token list supplied with the sentence and must identify the exact occurrence. Allowed categories are [subject, predicate, nonfinite, conjunction, relative, preposition]. Use subject for the head word of the main-clause subject and predicate for the main finite verb, not an arbitrary word inside the phrase.",
     "   For conjunction, use only true connectors or subordinators such as and, but, although, because, if, while, when, since, whether. Do not use sentence adverbs or discourse markers such as presently, currently, now, overall, generally.",
     "   For relative, use only real relative words such as which, who, whom, whose, where, when, why, or that when it truly introduces a clause.",
     "   Never highlight possessive determiners or simple pronouns such as my, your, his, her, its, our, their, it, they, them, this, these, those.",
     '   Never highlight plain "that" when it is only a determiner, for example in "that data".',
-    "5. clauseBlocks: output 2 to 6 strings in the format <type>|||<exact original text chunk>. Allowed types are [main, relative, subordinate, nonfinite, parallel, modifier]. The clauseBlocks must cover the whole sentence from first word to last word with no missing words and no overlap. Split long parts at commas, relative words, subordinators, coordinators, or nonfinite markers when that improves clarity, but do not isolate a bare preposition by itself.",
+    "5. clauseBlocks: output 2 to 10 strings in the format <type>|||<exact original text chunk>. Allowed types are [main, relative, subordinate, nonfinite, parallel, modifier]. The clauseBlocks must cover the whole sentence from first word to last word with no missing words and no overlap. Split long parts at commas, relative words, subordinators, coordinators, or nonfinite markers when that improves clarity, but do not isolate a bare preposition by itself.",
     "",
     "Final rules:",
     "The four steps must serve translation, avoid empty jargon, and focus on how structure changes understanding and translation order.",
@@ -513,7 +514,7 @@ async function requestLlmText({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.apiKey}`,
+          ...(settings.apiKey.trim() ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
         },
         body: JSON.stringify(openAiCompatibleRequestBody),
       };
@@ -550,6 +551,16 @@ async function requestLlmText({
         payload,
         response,
       };
+  }
+}
+
+function requiresLlmApiKey(settings: TranslatorSettings): boolean {
+  if (settings.llmProvider !== "openai") return true;
+  try {
+    const hostname = new URL(settings.providerBaseUrl).hostname.toLowerCase();
+    return hostname === "api.openai.com" || hostname.endsWith(".openai.com");
+  } catch {
+    return true;
   }
 }
 
@@ -729,7 +740,7 @@ export async function lookupDictionaryPartOfSpeech({
 }): Promise<string | undefined> {
   const query = (lemma || surface).trim().toLowerCase();
 
-  if (!query) {
+  if (!query || /\s/.test(query)) {
     return undefined;
   }
 
@@ -890,58 +901,34 @@ function parseAnalysisPair(
 }
 
 function sanitizeAnalysisHighlights(input: unknown): SentenceHighlight[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
+  if (!Array.isArray(input)) return [];
 
-  return input
-    .map((item) => {
-      if (typeof item === "string") {
-        const parsedPair = parseAnalysisPair(item);
-
-        if (!parsedPair) {
-          return null;
-        }
-
-        const category = parsedPair.left as SentenceHighlightCategory;
-        const text = parsedPair.right;
-        const normalized = text.toLowerCase();
-
-        if (
-          !HIGHLIGHT_CATEGORIES.has(category) ||
-          (category !== "preposition" && ANALYSIS_PLAIN_PREPOSITIONS.has(normalized))
-        ) {
-          return null;
-        }
-
-        return { text, category };
-      }
-
-      if (!item || typeof item !== "object") {
-        return null;
-      }
-
-      const text = cleanModelOutput(
-        typeof (item as { text?: unknown }).text === "string" ? (item as { text: string }).text : "",
-      );
-      const category =
-        typeof (item as { category?: unknown }).category === "string"
-          ? ((item as { category: string }).category as SentenceHighlightCategory)
-          : null;
-      const normalized = text.toLowerCase();
-
-      if (
-        !text ||
-        !category ||
-        !HIGHLIGHT_CATEGORIES.has(category) ||
-        (category !== "preposition" && ANALYSIS_PLAIN_PREPOSITIONS.has(normalized))
-      ) {
-        return null;
-      }
-
+  return input.map((item) => {
+    if (typeof item === "string") {
+      const parsedPair = parseAnalysisPair(item);
+      if (!parsedPair) return null;
+      const category = parsedPair.left as SentenceHighlightCategory;
+      const text = parsedPair.right;
+      if (!HIGHLIGHT_CATEGORIES.has(category)) return null;
       return { text, category };
-    })
-    .filter((item): item is SentenceHighlight => Boolean(item));
+    }
+
+    if (!item || typeof item !== "object") return null;
+    const object = item as { text?: unknown; category?: unknown; tokenIndex?: unknown };
+    const text = cleanModelOutput(typeof object.text === "string" ? object.text : "");
+    const category = typeof object.category === "string"
+      ? object.category as SentenceHighlightCategory
+      : null;
+    const tokenIndex = typeof object.tokenIndex === "number" && Number.isInteger(object.tokenIndex)
+      ? object.tokenIndex
+      : undefined;
+    const normalized = text.toLowerCase();
+    if (
+      !text || !category || !HIGHLIGHT_CATEGORIES.has(category) ||
+      (category !== "preposition" && ANALYSIS_PLAIN_PREPOSITIONS.has(normalized))
+    ) return null;
+    return tokenIndex !== undefined ? { text, category, tokenIndex } : { text, category };
+  }).filter((item): item is SentenceHighlight => Boolean(item));
 }
 
 const CLAUSE_BLOCK_TYPES = new Set<SentenceClauseBlockType>([
@@ -1180,92 +1167,116 @@ export function parseSentenceAnalysisResponse(payload: string): Omit<
   };
 }
 
+interface AnalysisToken { index: number; text: string; start: number; end: number }
+
+function tokenizeSentenceForAnalysis(sentence: string): AnalysisToken[] {
+  const tokens: AnalysisToken[] = [];
+  const matcher = createEnglishTokenMatcher();
+  let match = matcher.exec(sentence);
+  let index = 0;
+  while (match) {
+    tokens.push({ index, text: match[0], start: match.index, end: match.index + match[0].length });
+    index += 1;
+    match = matcher.exec(sentence);
+  }
+  return tokens;
+}
+
+function attachHighlightOffsets(
+  result: Omit<SentenceAnalysisResult, "provider" | "cached">,
+  sentence: string,
+): Omit<SentenceAnalysisResult, "provider" | "cached"> {
+  const tokens = tokenizeSentenceForAnalysis(sentence);
+  const used = new Set<number>();
+  const highlights = result.highlights.flatMap((item) => {
+    let token = Number.isInteger(item.tokenIndex) ? tokens[item.tokenIndex as number] : undefined;
+    if (!token || token.text.toLowerCase() !== item.text.toLowerCase()) {
+      token = tokens.find((candidate) =>
+        !used.has(candidate.index) && candidate.text.toLowerCase() === item.text.toLowerCase());
+    }
+    if (!token) return [];
+    used.add(token.index);
+    return [{ ...item, tokenIndex: token.index, start: token.start, end: token.end }];
+  });
+  return { ...result, highlights };
+}
+
+function clauseCoverageRatio(sentence: string, blocks: SentenceClauseBlock[]): number {
+  let cursor = 0;
+  let covered = 0;
+  for (const block of blocks) {
+    const value = block.text.trim();
+    if (!value) continue;
+    const start = sentence.indexOf(value, cursor);
+    if (start < 0) continue;
+    covered += value.length;
+    cursor = start + value.length;
+  }
+  return covered / Math.max(sentence.trim().length, 1);
+}
+
 function sentenceAnalysisNeedsRetry(
   result: Omit<SentenceAnalysisResult, "provider" | "cached">,
   sentence: string,
 ): boolean {
-  const wordCount = sentence.match(/[A-Za-z]+(?:[-'][A-Za-z]+)*/g)?.length ?? 0;
-  const minHighlights = wordCount <= 12 ? 1 : 2;
-  const minBlocks = wordCount <= 12 ? 1 : 2;
-
-  if (result.highlights.length < minHighlights || result.clauseBlocks.length < minBlocks) {
-    return true;
-  }
-
-  const normalizedSentence = sentence.replace(/\s+/g, " ").trim();
-  const coveredText = result.clauseBlocks.map((block) => block.text).join(" ");
-  const normalizedCovered = coveredText.replace(/\s+/g, " ").trim();
-
-  if (!normalizedCovered) {
-    return true;
-  }
-
-  const coverageRatio = normalizedCovered.length / Math.max(normalizedSentence.length, 1);
-
-  if (coverageRatio < 0.72) {
-    return true;
-  }
-
-  const signalCategories = new Set(result.highlights.map((item) => item.category));
-  if (wordCount <= 12) {
-    return signalCategories.size < 1;
-  }
-
-  return signalCategories.size < 2;
+  const wordCount = tokenizeSentenceForAnalysis(sentence).length;
+  const minHighlights = wordCount <= 8 ? 1 : wordCount <= 16 ? 2 : 3;
+  const minBlocks = wordCount <= 8 ? 1 : 2;
+  if (result.highlights.length < minHighlights || result.clauseBlocks.length < minBlocks) return true;
+  if (result.highlights.some((item) => item.tokenIndex === undefined)) return true;
+  if (clauseCoverageRatio(sentence, result.clauseBlocks) < 0.9) return true;
+  const categories = new Set(result.highlights.map((item) => item.category));
+  return wordCount > 12 && categories.size < 2;
 }
 
 async function requestSentenceAnalysis({
   settings,
   sentence,
   systemPrompt,
+  qualityRetry = false,
 }: {
   settings: TranslatorSettings;
   sentence: string;
   systemPrompt: string;
+  qualityRetry?: boolean;
 }): Promise<Omit<SentenceAnalysisResult, "provider" | "cached">> {
+  const tokens = tokenizeSentenceForAnalysis(sentence);
+  const tokenList = tokens.map((token) => `${token.index}:${token.text}`).join(" ");
+  const retryInstruction = qualityRetry
+    ? "\nquality_retry: The previous attempt failed structural validation. Cover the entire source with exact clauseBlocks and use exact tokenIndex values for every highlight."
+    : "";
   let llmResult: { content: string; finishReason: string; payload: unknown; response: Response };
 
   try {
     llmResult = await requestLlmText({
       settings,
       systemPrompt,
-      userPrompt: `sentence: ${sentence}`,
-      temperature: 0.1,
-      maxTokens: 1000,
+      userPrompt: `sentence: ${sentence}\ntokens: ${tokenList}${retryInstruction}`,
+      temperature: qualityRetry ? 0 : 0.1,
+      maxTokens: 1600,
       timeoutMs: SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS,
       preferJson: true,
     });
   } catch (error) {
     throw new SentenceAnalysisRequestError(
       error instanceof Error ? error.message : "LLM analysis request failed.",
-      {
-        status: error instanceof LlmRequestError ? error.status : undefined,
-        responseText: "",
-        stage: "single-shot",
-      },
+      { status: error instanceof LlmRequestError ? error.status : undefined, responseText: "", stage: qualityRetry ? "quality-retry" : "single-shot" },
     );
   }
 
-  const { content, finishReason, payload, response } = llmResult;
-
+  const { content, finishReason, response } = llmResult;
   if (isMaxTokenFinishReason(finishReason)) {
     throw new SentenceAnalysisRequestError("Sentence analysis response was truncated by max tokens.", {
-      status: response.status,
-      responseText: content.slice(0, 1600),
-      stage: "single-shot",
+      status: response.status, responseText: content.slice(0, 1600), stage: qualityRetry ? "quality-retry" : "single-shot",
     });
   }
 
   try {
-    return parseSentenceAnalysisResponse(content);
+    return attachHighlightOffsets(parseSentenceAnalysisResponse(content), sentence);
   } catch (error) {
     throw new SentenceAnalysisRequestError(
       error instanceof Error ? error.message : "Sentence analysis parsing failed.",
-      {
-        status: response.status,
-        responseText: content.slice(0, 1600),
-        stage: "single-shot",
-      },
+      { status: response.status, responseText: content.slice(0, 1600), stage: qualityRetry ? "quality-retry" : "single-shot" },
     );
   }
 }
@@ -1385,7 +1396,7 @@ export async function explainWordInEnglishWithLlm({
   settings: TranslatorSettings;
   userSettings: UserSettings;
 }): Promise<EnglishExplanationResult> {
-  if (!settings.apiKey.trim()) {
+  if (requiresLlmApiKey(settings) && !settings.apiKey.trim()) {
     throw new Error(t(settings.learnerLanguageCode, "errorEnterApiKey"));
   }
 
@@ -1436,7 +1447,7 @@ export async function translateWithLlm({
   userSettings?: UserSettings;
   responseMode?: TranslatorSettings["llmDisplayMode"];
 }): Promise<TranslationResult> {
-  if (!settings.apiKey.trim()) {
+  if (requiresLlmApiKey(settings) && !settings.apiKey.trim()) {
     throw new TranslatorFallbackError("Missing LLM API key.");
   }
 
@@ -1520,11 +1531,11 @@ export async function translateSelectionWithLlm({
   contextText: string;
   settings: TranslatorSettings;
 }): Promise<TranslationResult> {
-  if (!settings.apiKey.trim()) {
+  if (requiresLlmApiKey(settings) && !settings.apiKey.trim()) {
     throw new TranslatorFallbackError("Missing LLM API key.");
   }
 
-  const selection = trimContext(text);
+  const selection = text.replace(/\s+/g, " " ).trim().slice(0, 1200);
   const context = trimContext(contextText || text);
   let content = "";
 
@@ -1568,49 +1579,37 @@ export async function analyzeSentenceWithLlm({
   text: string;
   settings: TranslatorSettings;
 }): Promise<SentenceAnalysisResult> {
-  if (!settings.apiKey.trim()) {
+  if (requiresLlmApiKey(settings) && !settings.apiKey.trim()) {
     throw new Error(t(settings.learnerLanguageCode, "errorEnterApiKey"));
   }
 
-  const sentence = text.trim();
+  const sentence = text.replace(/\s+/g, " ").trim().slice(0, 1200);
   const analysisPrompt = buildSentenceAnalysisPrompt(settings);
 
   try {
-    const result = await requestSentenceAnalysis({
-      settings,
-      sentence,
-      systemPrompt: analysisPrompt,
-    });
+    let result = await requestSentenceAnalysis({ settings, sentence, systemPrompt: analysisPrompt });
+    if (sentenceAnalysisNeedsRetry(result, sentence)) {
+      const retry = await requestSentenceAnalysis({
+        settings, sentence, systemPrompt: analysisPrompt, qualityRetry: true,
+      });
+      if (sentenceAnalysisNeedsRetry(retry, sentence)) {
+        throw new SentenceAnalysisFormatError("Sentence analysis failed structural quality validation.");
+      }
+      result = retry;
+    }
 
-    return {
-      ...result,
-      provider: getLlmProviderTag(),
-      cached: false,
-    };
+    return { ...result, provider: getLlmProviderTag(), cached: false };
   } catch (error) {
     if (error instanceof SentenceAnalysisRequestError) {
       logSentenceAnalysisDebug("request_failed", {
-        stage: error.stage,
-        status: error.status,
-        message: error.message,
-        responseText: error.responseText,
-        sentence,
+        stage: error.stage, status: error.status, message: error.message, responseText: error.responseText, sentence,
       });
     } else if (error instanceof SentenceAnalysisFormatError) {
-      logSentenceAnalysisDebug("format_failed", {
-        message: error.message,
-        sentence,
-      });
+      logSentenceAnalysisDebug("format_failed", { message: error.message, sentence });
     }
-
-    if (error instanceof SentenceAnalysisFormatError) {
+    if (error instanceof SentenceAnalysisFormatError || error instanceof SentenceAnalysisRequestError) {
       throw new Error(t(settings.learnerLanguageCode, "errorSentenceAnalysisUnstable"));
     }
-
-    if (error instanceof SentenceAnalysisRequestError) {
-      throw new Error(t(settings.learnerLanguageCode, "errorSentenceAnalysisUnstable"));
-    }
-
     throw error;
   }
 }

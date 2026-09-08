@@ -1,6 +1,16 @@
 import { STORAGE_SETTINGS_KEY, STORAGE_TRANSLATOR_SETTINGS_KEY } from "../shared/constants";
 import { t } from "../shared/i18n";
 import { lookupRank, resolveLookupLemma } from "../shared/lexicon";
+import { findLearningPhraseAtOffset } from "../shared/phrases";
+import { createIncrementalHighlightEngine, PENDING_HIGHLIGHT_NAMES } from "./highlightEngine";
+import {
+  createTooltipSession,
+  HIDDEN_TOOLTIP_SESSION,
+  isAnalysisTooltipSession,
+  isPersistentTooltipSessionState,
+  isSelectionTooltipSession,
+  shouldPreserveAnalysisContextOnHide,
+} from "./tooltipSession";
 import {
   getDisplayClauseBlocks,
 } from "../shared/sentenceAnalysisDisplay";
@@ -22,8 +32,10 @@ import {
   extractWordAtOffset,
   isEnglishSelectionText,
   isSingleEnglishWord,
+  MAX_SELECTION_TEXT_LENGTH,
   normalizeSelectionText,
   normalizeSingleEnglishWord,
+  validateEnglishSelectionText,
 } from "../shared/word";
 import type {
   LexiconLookupResult,
@@ -36,12 +48,11 @@ import type {
 
 const HOVER_DELAY_MS = 320;
 const HIDE_DELAY_MS = 1200;
-const HIGHLIGHT_NAME = "wordwise-pending";
-const HIGHLIGHT_SCAN_LIMIT = 1200;
 const SELECTION_TRIGGER_DEBOUNCE_MS = 40;
 let currentLearnerLanguageCode: SupportedLearnerLanguageCode = "zh-CN";
 let currentDefaultTranslationProvider: TranslationProviderChoice = "google";
 let activeDisplayedTranslationProvider: TranslationProviderChoice = "google";
+let highlightEngine: ReturnType<typeof createIncrementalHighlightEngine> | null = null;
 
 function ui(key: Parameters<typeof t>[1], variables?: Record<string, string | number>): string {
   return t(currentLearnerLanguageCode, key, variables);
@@ -1362,9 +1373,17 @@ const TOOLTIP_STYLE = `
 `;
 
 const HIGHLIGHT_STYLE = `
-  ::highlight(${HIGHLIGHT_NAME}) {
+  ::highlight(wordwise-pending-strong) {
+    background: rgba(250, 204, 21, 0.4);
+    font-weight: 700;
+  }
+  ::highlight(wordwise-pending) {
     background: rgba(250, 204, 21, 0.28);
     font-weight: 600;
+  }
+  ::highlight(wordwise-pending-weak) {
+    background: rgba(250, 204, 21, 0.13);
+    font-weight: 500;
   }
 `;
 
@@ -1454,84 +1473,82 @@ function isEmbeddedInTechnicalToken(text: string, start: number, end: number): b
 }
 
 function extractSentenceAroundRange(text: string, start: number, end: number): string {
-  const leftBoundary = Math.max(
-    text.lastIndexOf(".", start - 1),
-    text.lastIndexOf("!", start - 1),
-    text.lastIndexOf("?", start - 1),
-    text.lastIndexOf("\n", start - 1),
-  );
-  const rightCandidates = [
-    text.indexOf(".", end),
-    text.indexOf("!", end),
-    text.indexOf("?", end),
-    text.indexOf("\n", end),
-  ].filter((value) => value >= 0);
-  const rightBoundary = rightCandidates.length ? Math.min(...rightCandidates) : text.length;
-  const sentence = text.slice(leftBoundary >= 0 ? leftBoundary + 1 : 0, rightBoundary).trim();
+  const compactText = text.replace(/\u00a0/g, " ");
 
-  if (!sentence) {
-    return text.slice(Math.max(0, start - 100), Math.min(text.length, end + 100)).trim();
-  }
-
-  return sentence;
-}
-
-function extractContextAroundDomRange(range: Range, fallback: string): string {
-  const startContainer = range.startContainer;
-
-  if (startContainer.nodeType === Node.TEXT_NODE && startContainer === range.endContainer) {
-    const textNode = startContainer as Text;
-    const localText = textNode.textContent ?? "";
-    const localSentence = extractSentenceAroundRange(localText, range.startOffset, range.endOffset);
-
-    if (countEnglishWords(localSentence) >= 4 || /\bby\s+[A-Za-z]/i.test(localSentence)) {
-      return localSentence;
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    try {
+      const segmenter = new Intl.Segmenter("en", { granularity: "sentence" });
+      for (const segment of segmenter.segment(compactText)) {
+        const segmentStart = segment.index;
+        const segmentEnd = segmentStart + segment.segment.length;
+        if (start >= segmentStart && end <= segmentEnd) {
+          const sentence = segment.segment.trim();
+          if (sentence) return sentence;
+        }
+      }
+    } catch {
+      // Fall through to punctuation-based segmentation for older engines.
     }
   }
 
+  const leftBoundary = Math.max(
+    compactText.lastIndexOf(".", start - 1),
+    compactText.lastIndexOf("!", start - 1),
+    compactText.lastIndexOf("?", start - 1),
+    compactText.lastIndexOf("\n", start - 1),
+  );
+  const rightCandidates = [
+    compactText.indexOf(".", end),
+    compactText.indexOf("!", end),
+    compactText.indexOf("?", end),
+    compactText.indexOf("\n", end),
+  ].filter((value) => value >= 0);
+  const rightBoundary = rightCandidates.length ? Math.min(...rightCandidates) : compactText.length;
+  const sentence = compactText.slice(leftBoundary >= 0 ? leftBoundary + 1 : 0, rightBoundary).trim();
+  return sentence || compactText.slice(Math.max(0, start - 120), Math.min(compactText.length, end + 120)).trim();
+}
+
+function extractContextAroundDomRange(range: Range, fallback: string): string {
   let ancestor: Element | null =
     range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
       ? range.commonAncestorContainer as Element
       : range.commonAncestorContainer.parentElement;
+  let bestCandidate = "";
 
-  for (let depth = 0; ancestor && depth < 5; depth += 1, ancestor = ancestor.parentElement) {
-    if (isIgnoredContainer(ancestor)) {
-      continue;
-    }
-
+  // Prefer a logical ancestor sentence over a single inline text node. Modern
+  // pages frequently split one sentence across links, strong tags, and spans.
+  for (let depth = 0; ancestor && depth < 6; depth += 1, ancestor = ancestor.parentElement) {
+    if (isIgnoredContainer(ancestor)) continue;
     const text = ancestor.textContent ?? "";
     const compact = normalizeSelectionText(text);
-
-    if (!compact || compact === fallback || compact.length > 1200) {
-      continue;
-    }
+    if (!compact || compact.length > 1800) continue;
 
     try {
       const prefixRange = document.createRange();
       prefixRange.selectNodeContents(ancestor);
       prefixRange.setEnd(range.startContainer, range.startOffset);
       const start = prefixRange.toString().length;
-
       const selectionLength = range.toString().length;
       const candidate = extractSentenceAroundRange(text, start, start + selectionLength);
-
-      if (countEnglishWords(candidate) < 2) {
-        continue;
-      }
-
-      if (
-        /\bby\s+[A-Za-z]/i.test(candidate) ||
-        /\b(?:points?|comments?|hours?\s+ago|minutes?\s+ago|hide|past|favorite|root|parent|next)\b/i.test(candidate) ||
-        countEnglishWords(fallback) < 4
-      ) {
-        return normalizeSelectionText(candidate);
+      const wordCount = countEnglishWords(candidate);
+      if (wordCount < 2) continue;
+      bestCandidate = normalizeSelectionText(candidate);
+      if (wordCount >= 4 || /\bby\s+[A-Za-z]/i.test(candidate)) {
+        return bestCandidate;
       }
     } catch {
       continue;
     }
   }
 
-  return fallback;
+  if (range.startContainer.nodeType === Node.TEXT_NODE && range.startContainer === range.endContainer) {
+    const textNode = range.startContainer as Text;
+    const localText = textNode.textContent ?? "";
+    const localSentence = extractSentenceAroundRange(localText, range.startOffset, range.endOffset);
+    if (countEnglishWords(localSentence) >= 2) return normalizeSelectionText(localSentence);
+  }
+
+  return bestCandidate || fallback;
 }
 
 function escapeHtml(value: string): string {
@@ -1590,17 +1607,10 @@ function getHighlightSegments(surface: string, start: number): HighlightSegment[
 
 function isAnalyzableSelectionText(text: string): boolean {
   const compact = normalizeSelectionText(text);
-
-  if (!compact || compact.length < 32 || compact.length > 360) {
-    return false;
-  }
-
-  if (/[\u4e00-\u9fff]/u.test(compact)) {
-    return false;
-  }
-
-  const words = compact.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? [];
-  return words.length >= 7;
+  if (!compact || compact.length < 10 || compact.length > 1200) return false;
+  if (/[\u4e00-\u9fff]/u.test(compact)) return false;
+  const words = compact.match(/[A-Za-z]+(?:['’][A-Za-z]+)?/g) ?? [];
+  return words.length >= 3;
 }
 
 const HIGHLIGHT_CATEGORY_META = {
@@ -1703,19 +1713,22 @@ function buildHighlightAssignments(
 
   for (const item of result.highlights) {
     const normalized = normalizeHighlightWord(item.text);
+    if (!normalized || POSSESSIVE_DETERMINER_WORDS.has(normalized)) continue;
 
-    if (
-      !normalized ||
-      POSSESSIVE_DETERMINER_WORDS.has(normalized) ||
-      (normalized === "that" && item.category !== "relative" && item.category !== "conjunction")
-    ) {
-      continue;
+    if (Number.isInteger(item.tokenIndex)) {
+      const token = tokens[item.tokenIndex as number];
+      if (token && token.normalized === normalized && !assignments.has(token.index)) {
+        assignments.set(token.index, item.category);
+        continue;
+      }
     }
 
+    // Legacy/provider fallback only. New prompts return tokenIndex so repeated
+    // words such as multiple occurrences of "that" cannot be mis-highlighted.
     assignFirstMatchingToken(
       tokens,
       assignments,
-        (token) => token.normalized === normalized,
+      (token) => token.normalized === normalized,
       item.category,
     );
   }
@@ -2516,7 +2529,7 @@ function getSelectedWordContext(pointer?: { clientX: number; clientY: number }):
     range.startContainer === range.endContainer
   ) {
     const baseStartOffset = range.startOffset;
-    const trimmedStart = rawSurface.search(/[A-Za-z']/);
+    const trimmedStart = rawSurface.search(/[A-Za-z'’]/);
 
     if (trimmedStart >= 0) {
       range.setStart(range.startContainer, baseStartOffset + trimmedStart);
@@ -2864,11 +2877,10 @@ let activeSelectionTooltipContext: SelectedTextContext | null = null;
 let activeSelectionTranslationRequestId = 0;
 let activeSelectionContext: SentenceSelectionContext | null = null;
 let selectionRequestId = 0;
-let analysisPanelOpen = false;
+let tooltipSession = HIDDEN_TOOLTIP_SESSION;
 let activeSentenceAnalysisRequestId = 0;
 let suppressSelectionTriggerUntil = 0;
 let pointerSelecting = false;
-let activeWordTooltipSource: "hover-word" | "review-word" | "selection-translate" = "hover-word";
 let activePronunciationSurface = "";
 let activePronunciationRequestId = 0;
 let activePronunciationResult: PronunciationResult | null = null;
@@ -2885,11 +2897,11 @@ function stopActivePronunciationAudio() {
 }
 
 function isPersistentTooltipSession(): boolean {
-  return tooltip.host.style.display === "block" &&
-    (activeWordTooltipSource === "review-word" || activeWordTooltipSource === "selection-translate" || analysisPanelOpen);
+  return tooltip.host.style.display === "block" && isPersistentTooltipSessionState(tooltipSession);
 }
 
 function hideTooltip() {
+  const preserveAnalysisContext = shouldPreserveAnalysisContextOnHide(tooltipSession);
   stopActivePronunciationAudio();
   clearSelectionTriggerTimer();
   tooltip.host.style.display = "none";
@@ -2909,9 +2921,9 @@ function hideTooltip() {
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
   activePronunciationResult = null;
-  activeWordTooltipSource = "hover-word";
+  tooltipSession = HIDDEN_TOOLTIP_SESSION;
   activeDisplayedTranslationProvider = currentDefaultTranslationProvider;
-  if (!analysisPanelOpen) {
+  if (!preserveAnalysisContext) {
     activeSelectionContext = null;
   }
 }
@@ -3073,11 +3085,11 @@ async function animateTranslationSwap(applyResult: () => void | Promise<void>) {
 }
 
 function clearHighlights() {
-  if (!supportsHighlights()) {
-    return;
+  highlightEngine?.clear();
+  if (!("highlights" in CSS)) return;
+  for (const name of Object.values(PENDING_HIGHLIGHT_NAMES)) {
+    CSS.highlights.delete(name);
   }
-
-  CSS.highlights.delete(HIGHLIGHT_NAME);
 }
 
 function scheduleHide() {
@@ -3144,7 +3156,9 @@ function hideSentenceAnalysis(options?: { preservePanel?: boolean }) {
     tooltip.analysisStructureEl.textContent = "";
     tooltip.analysisStepsEl.innerHTML = "";
     tooltip.analysisTriggerButton.style.display = "none";
-    analysisPanelOpen = false;
+    if (isAnalysisTooltipSession(tooltipSession)) {
+      tooltipSession = HIDDEN_TOOLTIP_SESSION;
+    }
     activeSelectionContext = null;
   }
 
@@ -3225,7 +3239,7 @@ async function loadPronunciation(surface: string) {
   if (
     !response.ok ||
     requestId !== activePronunciationRequestId ||
-    activeWordTooltipSource === "selection-translate" ||
+    isSelectionTooltipSession(tooltipSession) ||
     activePronunciationSurface !== normalizedSurface
   ) {
     return;
@@ -3280,13 +3294,12 @@ function renderSelectionTooltip(
   activeAnchorRect = context.rect;
   activeSelectionTooltipContext = context;
   activeSelectionContext = context;
-  activeWordTooltipSource = "selection-translate";
+  tooltipSession = createTooltipSession("selection");
   setDisplayedTranslationProvider(displayedProvider);
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
   activeContext = null;
   activeResult = null;
-  analysisPanelOpen = false;
   positionTooltip(context.rect);
 }
 
@@ -3310,7 +3323,7 @@ function showSentenceAnalysisButton(context: SentenceSelectionContext) {
   tooltip.analysisStructureEl.textContent = "";
   tooltip.analysisStepsEl.innerHTML = "";
   tooltip.host.style.display = "block";
-  analysisPanelOpen = false;
+  tooltipSession = createTooltipSession("analysisPrompt");
   positionSentenceAnalysisButton(context.rect);
 }
 
@@ -3404,7 +3417,7 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.host.style.display = "block";
   activeAnchorRect = rect;
   activeSelectionTooltipContext = null;
-  activeWordTooltipSource = activeContext?.forceTranslate ? "review-word" : "hover-word";
+  tooltipSession = createTooltipSession(activeContext?.forceTranslate ? "reviewWord" : "hoverWord");
   positionTooltip(rect);
   activeResult = result;
   if (activePronunciationSurface !== result.surface) {
@@ -3433,7 +3446,7 @@ function renderSentenceAnalysisPanel(
   tooltip.analysisStructureEl.textContent = result.structure;
   tooltip.analysisStepsEl.innerHTML = renderAnalysisStepsMarkup(result.analysisSteps);
   tooltip.host.style.display = "block";
-  analysisPanelOpen = true;
+  tooltipSession = createTooltipSession("analysis");
   positionSentenceAnalysisPanel(context.rect);
   requestAnimationFrame(() => {
     if (tooltip.analysisView.dataset.visible === "true") {
@@ -3464,107 +3477,11 @@ async function ensureSettings(): Promise<UserSettings> {
 }
 
 async function refreshHighlights() {
-  if (!supportsHighlights() || !document.body) {
-    return;
-  }
-
-  const settings = await ensureSettings();
-  const highlight = new Highlight();
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      return node instanceof Text && !shouldSkipTextNode(node)
-        ? NodeFilter.FILTER_ACCEPT
-        : NodeFilter.FILTER_REJECT;
-    },
-  });
-
-  const matcher = createEnglishTokenMatcher();
-  let pendingCount = 0;
-  let currentNode = walker.nextNode();
-
-  while (currentNode && pendingCount < HIGHLIGHT_SCAN_LIMIT) {
-    const textNode = currentNode as Text;
-    const text = textNode.textContent ?? "";
-    matcher.lastIndex = 0;
-
-    let match = matcher.exec(text);
-    while (match && pendingCount < HIGHLIGHT_SCAN_LIMIT) {
-      const surface = match[0];
-      const start = match.index;
-      const end = match.index + surface.length;
-
-      if (isEmbeddedInTechnicalToken(text, start, end)) {
-        match = matcher.exec(text);
-        continue;
-      }
-
-      const segments = getHighlightSegments(surface, start);
-      let highlightedSegment = false;
-
-      for (const segment of segments) {
-        if (pendingCount >= HIGHLIGHT_SCAN_LIMIT) {
-          break;
-        }
-
-        const lemma = resolveLookupLemma(segment.surface);
-        const rank = lemma ? lookupRank(lemma) : null;
-        const contextText = getHighlightTokenContext(textNode, segment.start, segment.end, segment.surface);
-
-        if (!shouldTranslateHighlightToken(segment.surface, lemma, rank, settings, contextText)) {
-          continue;
-        }
-
-        const range = document.createRange();
-        range.setStart(textNode, segment.start);
-        range.setEnd(textNode, segment.end);
-        const rect = range.getBoundingClientRect();
-
-        if (isVisibleRect(rect)) {
-          highlight.add(range);
-          pendingCount += 1;
-          highlightedSegment = true;
-        }
-      }
-
-      if (!highlightedSegment) {
-        const lemma = resolveLookupLemma(surface);
-        const rank = lemma ? lookupRank(lemma) : null;
-        const contextText = getHighlightTokenContext(textNode, start, end, surface);
-
-        if (shouldTranslateHighlightToken(surface, lemma, rank, settings, contextText)) {
-          const range = document.createRange();
-          range.setStart(textNode, start);
-          range.setEnd(textNode, end);
-          const rect = range.getBoundingClientRect();
-
-          if (isVisibleRect(rect)) {
-            highlight.add(range);
-            pendingCount += 1;
-          }
-        }
-      }
-
-      match = matcher.exec(text);
-    }
-
-    currentNode = walker.nextNode();
-  }
-
-  CSS.highlights.set(HIGHLIGHT_NAME, highlight);
+  highlightEngine?.refreshAll();
 }
 
 function scheduleHighlightRefresh() {
-  if (!supportsHighlights()) {
-    return;
-  }
-
-  if (highlightTimer) {
-    window.clearTimeout(highlightTimer);
-  }
-
-  highlightTimer = window.setTimeout(() => {
-    void refreshHighlights();
-  }, 220);
+  highlightEngine?.refreshAll();
 }
 
 function clearSelectionTriggerTimer() {
@@ -3604,6 +3521,13 @@ function getHighlightTokenContext(textNode: Text, start: number, end: number, fa
   range.setEnd(textNode, end);
   return extractContextAroundDomRange(range, fallback);
 }
+
+highlightEngine = createIncrementalHighlightEngine({
+  getSettings: ensureSettings,
+  shouldSkipTextNode,
+  getTokenContext: getHighlightTokenContext,
+  shouldTranslateToken: shouldTranslateHighlightToken,
+});
 
 async function resolveHoverWord(context: HoverContext) {
   let response: LookupWordResponse;
@@ -3851,7 +3775,7 @@ async function playPronunciationAudio(
 }
 
 async function speakPronunciation(accent: PronunciationAccent) {
-  if (!activeResult?.surface || activeWordTooltipSource === "selection-translate") {
+  if (!activeResult?.surface || isSelectionTooltipSession(tooltipSession)) {
     return;
   }
 
@@ -3918,7 +3842,7 @@ async function requestSentenceAnalysis(context: SentenceSelectionContext) {
   tooltip.analysisStructureEl.textContent = "";
   tooltip.analysisStepsEl.innerHTML = "";
   tooltip.host.style.display = "block";
-  analysisPanelOpen = true;
+  tooltipSession = createTooltipSession("analysis");
   positionSentenceAnalysisPanel(context.rect);
   await waitForPaint();
 
@@ -4012,48 +3936,67 @@ function isSameHoverTarget(context: HoverContext): boolean {
 
 function getHoverContext(clientX: number, clientY: number): HoverContext | null {
   const caret = getCaretRangeFromPoint(clientX, clientY);
-
-  if (!caret || isIgnoredContainer(caret.node)) {
-    return null;
-  }
+  if (!caret || isIgnoredContainer(caret.node)) return null;
 
   const text = caret.node.textContent ?? "";
-  const word = extractWordAtOffset(text, caret.offset);
-
-  if (!word) {
-    return null;
-  }
+  const target = findLearningPhraseAtOffset(text, caret.offset) ?? extractWordAtOffset(text, caret.offset);
+  if (!target) return null;
 
   const range = document.createRange();
-  range.setStart(caret.node, word.start);
-  range.setEnd(caret.node, word.end);
-
+  range.setStart(caret.node, target.start);
+  range.setEnd(caret.node, target.end);
   const rect = range.getBoundingClientRect();
-
-  if (!rect.width && !rect.height) {
-    return null;
-  }
+  if (!rect.width && !rect.height) return null;
 
   const horizontalPadding = 1;
   const verticalPadding = 2;
-
   if (
-    clientX < rect.left - horizontalPadding ||
-    clientX > rect.right + horizontalPadding ||
-    clientY < rect.top - verticalPadding ||
-    clientY > rect.bottom + verticalPadding
-  ) {
-    return null;
-  }
+    clientX < rect.left - horizontalPadding || clientX > rect.right + horizontalPadding ||
+    clientY < rect.top - verticalPadding || clientY > rect.bottom + verticalPadding
+  ) return null;
 
   activeRequestId += 1;
-
   return {
-    surface: word.surface,
+    surface: target.surface,
     rect,
     requestId: activeRequestId,
-    contextText: extractSentenceAroundRange(text, word.start, word.end),
+    contextText: extractContextAroundDomRange(range, target.surface),
   };
+}
+
+function showOverlongSelectionHint(): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+
+  const text = normalizeSelectionText(selection.toString());
+  if (validateEnglishSelectionText(text) !== "tooLong") return false;
+
+  const range = selection.getRangeAt(0).cloneRange();
+  if (shouldIgnoreSelectionRange(range)) return false;
+  const rect = range.getBoundingClientRect();
+  if ((!rect.width && !rect.height) || !isFinite(rect.left) || !isFinite(rect.top)) return false;
+
+  selectionRequestId += 1;
+  hideSentenceAnalysis();
+  renderSelectionTooltip({
+    text: "",
+    rect,
+    requestId: selectionRequestId,
+    contextText: "",
+    selectedFontSizePx: resolveSelectionFontSizePx(range),
+  });
+  activeSelectionTooltipContext = null;
+  activeSelectionContext = null;
+  tooltip.translationEl.dataset.visible = "true";
+  tooltip.metaEl.style.display = "flex";
+  tooltip.llmButton.style.display = "none";
+  tooltip.selectionAnalysisButton.style.display = "none";
+  tooltip.hintEl.dataset.visible = "true";
+  tooltip.hintEl.dataset.loading = "false";
+  tooltip.hintEl.dataset.kind = "status";
+  tooltip.hintEl.textContent = ui("tooltipSelectionTooLong", { limit: MAX_SELECTION_TEXT_LENGTH });
+  positionTooltip(rect);
+  return true;
 }
 
 async function updateSelectionAnalysisTrigger() {
@@ -4062,6 +4005,7 @@ async function updateSelectionAnalysisTrigger() {
   }
 
   const settings = await ensureSettings();
+  if (showOverlongSelectionHint()) return;
   const selectedWordContext = settings.wordReviewTrigger === "selection" ? getSelectedWordContext() : null;
 
   if (selectedWordContext) {
@@ -4073,7 +4017,7 @@ async function updateSelectionAnalysisTrigger() {
   const context = getSelectedTextContext();
 
   if (!context) {
-    const hadAnalysisOpen = analysisPanelOpen;
+    const hadAnalysisOpen = isAnalysisTooltipSession(tooltipSession);
     const hadSelectionOpen = Boolean(activeSelectionTooltipContext);
     hideSentenceAnalysis();
     if (hadAnalysisOpen || hadSelectionOpen) {
@@ -4393,8 +4337,7 @@ document.addEventListener(
       hideTooltip();
       hideSentenceAnalysis();
     }
-
-    scheduleHighlightRefresh();
+    // Highlight ranges remain valid while scrolling; no DOM rescan is needed.
   },
   { capture: true, passive: true },
 );
@@ -4404,12 +4347,11 @@ window.addEventListener("resize", () => {
     positionTooltip(activeSelectionTooltipContext.rect);
   }
 
-  if (analysisPanelOpen && activeSelectionContext) {
+  if (tooltipSession.kind === "analysis" && activeSelectionContext) {
     positionSentenceAnalysisPanel(activeSelectionContext.rect);
   } else if (activeSelectionContext) {
     positionSentenceAnalysisButton(activeSelectionContext.rect);
   }
-  scheduleHighlightRefresh();
 });
 
 window.addEventListener("blur", () => {
@@ -4419,7 +4361,7 @@ window.addEventListener("blur", () => {
 });
 
 window.addEventListener("focus", () => {
-  scheduleHighlightRefresh();
+  // Existing CSS Highlight ranges survive focus changes.
 });
 
 document.addEventListener("pointerdown", (event) => {
@@ -4467,8 +4409,8 @@ globalThis.chrome?.storage?.onChanged?.addListener?.((changes, areaName) => {
   scheduleHighlightRefresh();
 });
 
-const mutationObserver = new MutationObserver(() => {
-  scheduleHighlightRefresh();
+const mutationObserver = new MutationObserver((records) => {
+  highlightEngine?.handleMutations(records);
 });
 
 function startObservers() {

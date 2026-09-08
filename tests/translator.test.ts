@@ -440,57 +440,60 @@ describe("llm provider requests", () => {
 
 describe("sentence analysis parsing", () => {
   test("sends the full analysis sentence without trimContext truncation", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              content: JSON.stringify({
-                translation: "完整译文。",
-                structure: "main clause",
-                analysisSteps: ["一", "二", "三", "四"],
-                highlights: ["predicate|||works"],
-                clauseBlocks: ["main|||A very long sentence"],
-              }),
-            },
+  const longSentence = ` ${"A".repeat(230)} ${"B".repeat(90)} `;
+  const normalizedSentence = longSentence.trim();
+  const firstToken = "A".repeat(230);
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content: JSON.stringify({
+              translation: "完整译文。",
+              structure: "main clause",
+              analysisSteps: ["一", "二", "三", "四"],
+              highlights: [{ category: "subject", text: firstToken, tokenIndex: 0 }],
+              clauseBlocks: [`main|||${normalizedSentence}`],
+            }),
           },
-        ],
-      }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const longSentence = ` ${"A".repeat(230)} ${"B".repeat(90)} `;
+        },
+      ],
+    }),
+  });
+  vi.stubGlobal("fetch", fetchMock);
 
-    await analyzeSentenceWithLlm({
-      text: longSentence,
-      settings: {
-        defaultTranslationProvider: "google",
-        llmProvider: "openai",
-        providerBaseUrl: "https://example.com/v1",
-        providerModel: "test-model",
-        apiKey: "test-key",
-        fallbackToGoogle: true,
-        learnerLanguageCode: "ko",
-        llmDisplayMode: "word",
-        cacheDurationValue: 30,
-        cacheDurationUnit: "minutes",
-      },
-    });
-
-    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const payload = JSON.parse(String(request.body)) as {
-      messages: Array<{ role: string; content: string }>;
-    };
-
-    expect(payload.messages[0]?.content).toContain("Korean (ko)");
-    expect(payload.messages[0]?.content).toContain(
-      "Keep person names, usernames, brand names, and product names in their original English form",
-    );
-    expect(payload.messages.at(-1)?.content).toBe(`sentence: ${longSentence.trim()}`);
+  await analyzeSentenceWithLlm({
+    text: longSentence,
+    settings: {
+      defaultTranslationProvider: "google",
+      llmProvider: "openai",
+      providerBaseUrl: "https://example.com/v1",
+      providerModel: "test-model",
+      apiKey: "test-key",
+      fallbackToGoogle: true,
+      learnerLanguageCode: "ko",
+      llmDisplayMode: "word",
+      cacheDurationValue: 30,
+      cacheDurationUnit: "minutes",
+    },
   });
 
-  test("reads structured analysis payload", () => {
+  const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+  const payload = JSON.parse(String(request.body)) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+
+  expect(payload.messages[0]?.content).toContain("Korean (ko)");
+  expect(payload.messages[0]?.content).toContain(
+    "Keep person names, usernames, brand names, and product names in their original English form",
+  );
+  expect(payload.messages.at(-1)?.content).toContain(`sentence: ${normalizedSentence}`);
+  expect(payload.messages.at(-1)?.content).toContain(`tokens: 0:${firstToken}`);
+});
+
+test("reads structured analysis payload", () => {
     expect(
       parseSentenceAnalysisResponse(
         '{"translation":"尽管实验失败了，团队仍然决定继续。","structure":"主句是 team decided，although 引导让步状语从句。","analysisSteps":["先抓主句主干，主语是 team，谓语是 decided。","再看 although 引导的让步状语从句，交代背景。","最后补足 to continue 这个不定式，说明决定的内容。","顺着中文表达把整句译通。"],"highlights":[{"text":"Although","category":"conjunction"},{"text":"team","category":"subject"},{"text":"decided","category":"predicate"},{"text":"continue","category":"nonfinite"}],"clauseBlocks":[{"text":"Although the experiment failed,","type":"subordinate","label":"句块1"},{"text":"the team still decided","type":"main","label":"句块2"},{"text":"to continue","type":"nonfinite","label":"句块3"}]}',
