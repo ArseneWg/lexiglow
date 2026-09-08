@@ -57,7 +57,7 @@ export interface TranslatorSettingsState {
 }
 
 export type LearnerLevelBand = "A1" | "A2" | "B1" | "B2" | "C1";
-export type HighlightIntensity = "strong" | "normal" | "weak";
+export type HighlightIntensity = "strong" | "normal" | "weak" | "none";
 
 export interface TranslationResult {
   translation: string;
