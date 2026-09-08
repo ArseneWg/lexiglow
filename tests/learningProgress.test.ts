@@ -54,6 +54,33 @@ describe("familiarity-aware learning progress", () => {
     expect(getHighlightIntensity(settings, "worked", 1)).toBe("weak");
   });
 
+  test("well-exposed relearning words rest between review intervals and return when due", () => {
+    const baseNow = 1_800_000_000_000;
+    let settings = setWordUnmastered(DEFAULT_SETTINGS, "work", 100);
+
+    for (let index = 1; index <= 6; index += 1) {
+      settings = recordLearningExposure(settings, "worked", baseNow + index * 7 * 60 * 60 * 1000);
+    }
+
+    expect(settings.learningProgress.work.exposures).toBe(6);
+    expect(settings.learningProgress.work.familiarity).toBeGreaterThanOrEqual(0.75);
+    expect(getHighlightIntensity(settings, "worked", 1)).toBe("none");
+    expect(getHighlightIntensity(settings, "worked", 3)).toBe("weak");
+
+    const dueSettings = sanitizeSettings({
+      ...settings,
+      learningProgress: {
+        ...settings.learningProgress,
+        work: {
+          ...settings.learningProgress.work,
+          nextReviewAt: Date.now() - 1,
+        },
+      },
+    });
+
+    expect(getHighlightIntensity(dueSettings, "worked", 1)).toBe("strong");
+  });
+
   test("explicit mastery remains the authoritative completion action", () => {
     const relearning = setWordUnmastered(DEFAULT_SETTINGS, "work", 100);
     const mastered = setWordMastered(relearning, "worked");
