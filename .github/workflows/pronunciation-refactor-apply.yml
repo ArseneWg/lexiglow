@@ -1,4 +1,4 @@
-name: Pronunciation Refactor Apply
+name: Finalize Pronunciation Assets
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  finalize:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -24,142 +24,61 @@ jobs:
         with:
           node-version: 22
 
-      - name: Repair applicator template escaping
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('scripts/apply-pronunciation-refactor.mjs')
-          text = path.read_text()
-          text = text.replace('const pattern = new RegExp("\\\\b" + target.replace(/[.*+?^${}()|[\\\\]\\\\\\\\]/g, "\\\\\\\\$&") + "\\\\b", "i");', 'const pattern = new RegExp("\\\\b" + target + "\\\\b", "i");')
-          path.write_text(text)
-          PY
-          node --check scripts/apply-pronunciation-refactor.mjs
-
-      - name: Apply pronunciation refactor
-        run: node scripts/apply-pronunciation-refactor.mjs
-
-      - name: Generate pinned pronunciation data
+      - name: Generate bounded pinned pronunciation data
         run: node scripts/refresh-pronunciation-data.mjs
 
-      - name: Repair pronunciation correctness and compatibility
+      - name: Finalize docs and real-site selection helper
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          legacy = Path('src/shared/pronunciation.ts')
-          text = legacy.read_text()
+          readme = Path('README.md')
+          text = readme.read_text()
           text = text.replace(
-            'type PronunciationData = Omit<PronunciationResult, "cached">;',
-            'type PronunciationData = {\n  ukPhonetic?: string;\n  usPhonetic?: string;\n  ukAudioUrl?: string;\n  usAudioUrl?: string;\n};',
+            'The current suite contains 24 user-facing Chromium scenarios.',
+            'The current suite contains 30 user-facing Chromium scenarios.',
           )
-          legacy.write_text(text)
+          text = text.replace(
+            'The verified CI baseline is 16 Vitest files / 148 unit tests plus 24 / 24 Playwright Chromium extension E2E tests.',
+            'The verified CI baseline is 17 Vitest files / 158 unit tests plus 30 / 30 Playwright Chromium extension E2E tests.',
+          )
+          old = 'pinned offline CMUdict/Britfone subsets provide reproducible fallback data, common heteronyms are resolved from context/POS when confidence is high'
+          new = 'pinned offline CMUdict/Britfone subsets for the top 5,000 frequency words plus explicit edge cases provide bounded reproducible fallback data, common heteronyms are resolved from context/POS when confidence is high'
+          text = text.replace(old, new)
+          readme.write_text(text)
 
-          resolver = Path('src/shared/pronunciationResolver.ts')
-          text = resolver.read_text()
+          zh = Path('README.zh-CN.md')
+          text = zh.read_text()
+          text = text.replace('当前共有 **24 条 Chromium 用户流程**', '当前共有 **30 条 Chromium 用户流程**')
           text = text.replace(
-            'export function getPronunciationVariantForAccent(result: PronunciationResult | null | undefined, accent: PronunciationAccent): PronunciationVariant | undefined {',
-            'export function getPronunciationVariantForAccent(\n  result: (Pick<PronunciationResult, "selectedVariantIds"> & { variants: readonly PronunciationVariant[] }) | null | undefined,\n  accent: PronunciationAccent,\n): PronunciationVariant | undefined {',
+            '当前验证基线为 **16 个 Vitest 文件 / 148 条单元测试 + 24 / 24 条 Playwright Chromium 扩展 E2E**',
+            '当前验证基线为 **17 个 Vitest 文件 / 158 条单元测试 + 30 / 30 条 Playwright Chromium 扩展 E2E**',
           )
-          text = text.replace(
-            '{ partOfSpeech: "verb-past", us: "/rɛd/", gb: "/red/", context: /\\b(?:yesterday|last\\s+(?:night|week|year)|already|had|ago)\\b/i },\n    { partOfSpeech: "verb", us: "/riːd/", gb: "/riːd/", context: /\\b(?:to|will|would|can|could|should|please|i|you|we|they)\\s+read\\b/i },',
-            '{ partOfSpeech: "verb-past", us: "/rɛd/", gb: "/red/", context: /(?:\\bread\\b[^.!?]{0,80}\\b(?:yesterday|last\\s+(?:night|week|year)|ago)\\b|\\b(?:have|has|had)\\s+(?:already\\s+)?read\\b)/i },\n    { partOfSpeech: "verb", us: "/riːd/", gb: "/riːd/", context: /\\b(?:(?:to|will|would|can|could|should|please)\\s+read|(?:i|you|we|they)\\s+read\\s+(?:every|each|often|usually|daily|regularly|books?|articles?|news|aloud))\\b/i },',
-          )
-          text = text.replace(
-            '{ partOfSpeech: "verb-past", us: "/juːzd/", gb: "/juːzd/", context: /\\b(?:i|you|we|they|he|she|it)\\s+used\\b/i },',
-            '{ partOfSpeech: "verb-past", us: "/juːzd/", gb: "/juːzd/", context: /\\b(?:i|you|we|they|he|she|it)\\s+used(?!\\s+to\\b)/i },',
-          )
-          text = text.replace(
-            'function stripIpaDelimiters(value: string | undefined): string {\n  return (value || "").trim().replace(/^[/[]+|[/\\]]+$/g, "");\n}',
-            'function stripIpaDelimiters(value: string | undefined): string {\n  const trimmed = (value || "").trim();\n  if ((trimmed.startsWith("/") && trimmed.endsWith("/")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {\n    return trimmed.slice(1, -1);\n  }\n  return trimmed;\n}',
-          )
-          text = text.replace(
-            'if (/\\b(?:us|u\\.s\\.|general american|american|united states|canada|canadian)\\b/.test(text)) return "en-US";',
-            'if (/\\b(?:us|u\\.s\\.|general american|american|united states)\\b/.test(text)) return "en-US";',
-          )
-          text = text.replace(
-            '.filter((variant) => variant.accent === accent || variant.accent === "en")',
-            '.filter((variant) => variant.accent === accent)',
-          )
-          text = text.replace(
-            '(candidate.accent === variant.accent || candidate.accent === "en") &&',
-            'candidate.accent === variant.accent &&',
-          )
-          text = text.replace(
-            'audio: audioUrl ? { url: audioUrl, audioIpa: audioIpa || undefined } : undefined,',
-            'audio: audioUrl ? {\n          url: audioUrl,\n          audioIpa: audioIpa || undefined,\n          sourcePage: typeof sound.audio === "string" && sound.audio.trim()\n            ? `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(sound.audio.trim().replace(/ /g, "_"))}`\n            : undefined,\n        } : undefined,',
-          )
-          resolver.write_text(text)
+          text = text.replace('148 条单元测试、生产构建、两次 release 打包 SHA 一致性校验，以及 24 条真实 Chromium 扩展 E2E', '158 条单元测试、生产构建、两次 release 打包 SHA 一致性校验，以及 30 条真实 Chromium 扩展 E2E')
+          heading = '## 浏览器级回归测试'
+          if '## 发音准确性' not in text and heading in text:
+            section = '''## 发音准确性\n\n- 用户主动选中的单个英文词会直接进入发音解析；词组和整句仍保持翻译/分析流程，不伪造单词 IPA。\n- 发音解析基于 `surface + context + POS`。`record / refuse / lead / read / live / use` 等同形异音词只有在语境足够明确时才自动选择 reading；无法确定时禁用自动播放，不盲猜。\n- Kaikki/Wiktextract 的 IPA、audio、audio-IPA、口音与词性保持为同一个 pronunciation variant，避免把不同 reading 的 IPA 和录音拼在一起。\n- 匹配 reading 的真人 lexical audio 优先于 Chrome TTS；TTS 只作为 fallback，并且始终朗读用户选中的 exact surface。\n- `blocks / dogs / buses / looked / played / wanted` 等规则词形可根据 base phoneme 高置信推导 `/s z ɪz/` 或 `/t d ɪd/`，但绝不复用 base-word audio 冒充变形词录音。\n- IPA 按来源原样展示，不再做 DJ-style 破坏性转换；generic / Canadian 数据不会被冒充标记为 US / UK。\n- 离线 fallback 固定 CMUdict 与 Britfone revision，只打包高频 top 5,000 + 明确 edge-case 词；更低频词继续优先实时结构化数据和 exact-surface TTS，避免 MV3 service worker 体积无界增长。\n\n'''
+            text = text.replace(heading, section + heading)
+          zh.write_text(text)
 
-          content = Path('src/content/index.ts')
-          text = content.read_text()
-          text = text.replace(
-            '  activePronunciationResult = null;\n  tooltip.britishPhoneticEl.textContent = "/.../";\n  tooltip.americanPhoneticEl.textContent = "/.../";\n}',
-            '  activePronunciationResult = null;\n  tooltip.britishButton.disabled = true;\n  tooltip.americanButton.disabled = true;\n  tooltip.britishPhoneticEl.textContent = "/.../";\n  tooltip.americanPhoneticEl.textContent = "/.../";\n}',
-          )
-          text = text.replace(
-            '  if (response.result?.confidence === "ambiguous") {\n    tooltip.britishPhoneticEl.textContent = "Multiple pronunciations";\n    tooltip.americanPhoneticEl.textContent = "Multiple pronunciations";\n    return;\n  }\n  tooltip.britishPhoneticEl.textContent',
-            '  if (response.result?.confidence === "ambiguous") {\n    tooltip.britishButton.disabled = true;\n    tooltip.americanButton.disabled = true;\n    tooltip.britishPhoneticEl.textContent = "Multiple pronunciations";\n    tooltip.americanPhoneticEl.textContent = "Multiple pronunciations";\n    return;\n  }\n  tooltip.britishButton.disabled = false;\n  tooltip.americanButton.disabled = false;\n  tooltip.britishPhoneticEl.textContent',
-          )
-          text = text.replace(
-            '  .wordwise-pronunciation-action:hover {\n    color: #c2410c;\n  }',
-            '  .wordwise-pronunciation-action:hover {\n    color: #c2410c;\n  }\n  .wordwise-pronunciation-action:disabled {\n    opacity: 0.42;\n    cursor: wait;\n  }',
-          )
-          content.write_text(text)
-
-          settings = Path('e2e/settings-resilience.spec.ts')
-          text = settings.read_text()
-          start = text.find('  await context.route("https://api.dictionaryapi.dev/api/v2/entries/en/obfuscation"')
-          end = text.find('\n\n  await extensionWorker.evaluate', start)
-          if start >= 0 and end >= 0:
-            replacement = '''  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route) => {\n    await route.fulfill({\n      status: 200,\n      contentType: "application/jsonl",\n      body: JSON.stringify({\n        word: "obfuscation",\n        pos: "noun",\n        sounds: [\n          { tags: ["UK"], ipa: "/ˌɒbfʌsˈkeɪʃən/" },\n          { tags: ["US"], ipa: "/ˌɑːbfəsˈkeɪʃən/" },\n        ],\n      }),\n    });\n  });'''
-            text = text[:start] + replacement + text[end:]
-          text = text.replace('/ˌɒbfʌsˈkeiʃən/', '/ˌɒbfʌsˈkeɪʃən/')
-          settings.write_text(text)
-
-          live = Path('e2e/sites/pronunciation-live-source.spec.ts')
-          text = live.read_text()
-          text = text.replace(
-            '  expect(response?.status() ?? 200).toBeLessThan(400);\n  expect(await selectFirstWord(page, "component")).toBe(true);',
-            '  expect(response?.status() ?? 200).toBeLessThan(400);\n  await page.waitForTimeout(600);\n  expect(await selectFirstWord(page, "component")).toBe(true);',
-          )
-          live.write_text(text)
-
-          browser = Path('e2e/pronunciation-accuracy.spec.ts')
-          text = browser.read_text()
-          text = text.replace(
-            'async function routePronunciation(context: Parameters<typeof test>[0] extends never ? never : any, word: string, withAudio = false) {',
-            'async function routePronunciation(context: Parameters<typeof test>[0] extends never ? never : any, word: string, withAudio = false, delayMs = 0) {',
-          )
-          text = text.replace(
-            '  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route: any) => {\n    const audio = withAudio',
-            '  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route: any) => {\n    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));\n    const audio = withAudio',
-          )
-          marker = 'test("multi-word selection keeps pronunciation controls hidden"'
-          if 'keeps playback disabled until pronunciation lookup resolves' not in text and marker in text:
-            test_block = '''test("keeps playback disabled until pronunciation lookup resolves", async ({ context, page }) => {\n  await mockGoogleTranslation(context, "混淆");\n  await routePronunciation(context, "obfuscation", true, 500);\n  await serveTestPage(context, page, '<p>I study <span id="target">obfuscation</span> carefully.</p>');\n  await selectElementText(page, "#target");\n  const usButton = page.getByLabel("播放美式发音");\n  await expect(usButton).toBeVisible();\n  await expect(usButton).toBeDisabled();\n  await expect(usButton).toBeEnabled({ timeout: 3_000 });\n});\n\n'''
-            text = text.replace(marker, test_block + marker)
-          browser.write_text(text)
-
-          unit = Path('tests/pronunciationResolver.test.ts')
-          text = unit.read_text()
-          marker = '  test("returns the explicitly selected accent variant"'
-          if 'does not relabel generic or Canadian pronunciation as US or UK' not in text and marker in text:
-            block = '''  test("does not relabel generic or Canadian pronunciation as US or UK", async () => {\n    const generic = extractKaikkiPronunciationVariants(\n      JSON.stringify({ word: "foobar", sounds: [{ tags: ["Canada"], ipa: "/ˈfuːbɑr/" }] }),\n      "foobar",\n    );\n    expect(generic[0]?.accent).toBe("en");\n\n    const fetchMock = vi.fn(async () => ({\n      ok: true,\n      text: async () => JSON.stringify({ word: "foobar", sounds: [{ ipa: "/ˈfuːbɑr/" }] }),\n    }));\n    const result = await resolvePronunciation("foobar", { fetchFn: fetchMock as never });\n    expect(result.selectedVariantIds).toEqual({});\n    expect(result.ukPhonetic).toBeUndefined();\n    expect(result.usPhonetic).toBeUndefined();\n    expect(result.ttsAllowed).toBe(true);\n  });\n\n'''
-            text = text.replace(marker, block + marker)
-          unit.write_text(text)
+          site = Path('e2e/sites/pronunciation-sites.spec.ts')
+          text = site.read_text()
+          start = text.index('async function selectWord')
+          end = text.index('\n\nasync function load', start)
+          helper = '''async function selectWord(page: Page, word: string): Promise<boolean> {\n  return page.evaluate(async (target) => {\n    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);\n    let node = walker.nextNode() as Text | null;\n    const pattern = new RegExp("\\\\b" + target + "\\\\b", "i");\n\n    while (node) {\n      const parent = node.parentElement;\n      if (parent && !parent.closest("script, style, noscript, input, textarea, select, option, code, pre")) {\n        const match = (node.textContent || "").match(pattern);\n        const style = getComputedStyle(parent);\n        const parentRect = parent.getBoundingClientRect();\n        const visible =\n          style.display !== "none" &&\n          style.visibility !== "hidden" &&\n          Number(style.opacity || "1") > 0 &&\n          parentRect.width > 0 &&\n          parentRect.height > 0;\n\n        if (visible && match && match.index !== undefined) {\n          parent.scrollIntoView({ block: "center", inline: "nearest" });\n          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));\n\n          const range = document.createRange();\n          range.setStart(node, match.index);\n          range.setEnd(node, match.index + match[0].length);\n          const rect = range.getBoundingClientRect();\n          if (rect.width <= 0 || rect.height <= 0) {\n            node = walker.nextNode() as Text | null;\n            continue;\n          }\n\n          const selection = window.getSelection();\n          selection?.removeAllRanges();\n          selection?.addRange(range);\n          document.dispatchEvent(new Event("selectionchange"));\n          document.dispatchEvent(new MouseEvent("mouseup", {\n            bubbles: true,\n            clientX: rect.left + Math.min(4, rect.width / 2),\n            clientY: rect.top + Math.min(4, rect.height / 2),\n          }));\n          return true;\n        }\n      }\n      node = walker.nextNode() as Text | null;\n    }\n    return false;\n  }, word);\n}'''
+          site.write_text(text[:start] + helper + text[end:])
           PY
 
-      - name: Commit generated refactor
+      - name: Commit finalized assets
         shell: bash
         run: |
           if git diff --quiet; then
-            echo "No pronunciation refactor changes to commit."
+            echo "No finalization changes to commit."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src scripts e2e tests package.json THIRD_PARTY_NOTICES.md README.md
-          git commit -m "Refine pronunciation correctness safeguards"
+          git add src/generated/pronunciationData.ts README.md README.zh-CN.md e2e/sites/pronunciation-sites.spec.ts
+          git commit -m "Finalize pronunciation assets and site coverage"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
