@@ -1,11 +1,11 @@
-# LexiGlow | Learn English Inside Your Workflow
+# LexiGlow | Learn English inside your reading flow
 
-[简体中文说明](./README.zh-CN.md)
+[简体中文](./README.zh-CN.md)
 
-![LexiGlow banner showing the in-page tooltip workflow](./assets/lexiglow-banner-en.svg)
+![LexiGlow banner showing the in-page tooltip workflow](./assets/lexiglow-banner.svg)
 
 <p align="center">
-  Start with a fast Google result, expand to contextual translation only when needed, and keep review, pronunciation, English explanations, and sentence analysis inside the page you are already reading.
+  Fast Google lookup by default. Contextual LLM help, review, English explanations, pronunciation, and sentence analysis stay on the page when you need them.
 </p>
 
 <p align="center">
@@ -22,70 +22,63 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/built%20with-TypeScript-2f74c0?style=flat-square" />
 </p>
 
-## What LexiGlow Is
+## What is LexiGlow?
 
-LexiGlow is a Chrome extension for learning English while reading real pages on the web. Instead of pushing you into a separate flashcard flow, it overlays lookup, review, pronunciation, contextual translation, English explanations, and long-sentence analysis directly on top of your normal reading.
+LexiGlow is a Chrome extension for learning English while reading. It keeps lookup, review, pronunciation, contextual translation, English explanations, and complex-sentence analysis inside the page instead of forcing a separate study workflow.
 
-It is designed for reading situations like these:
+Typical reading flows include:
 
-- Hover an unfamiliar word or useful multi-word expression and get a fast default translation first.
-- Expand to contextual translation only when the default result is not precise enough.
-- Double-click a word you used to know and bring it back into review.
-- Read a simple English explanation adapted to your current vocabulary range.
-- Break down a difficult sentence inside the same tooltip without leaving the page.
+- Hover an unfamiliar highlighted word for a fast default translation.
+- Switch to contextual translation only when the quick result is insufficient.
+- Put a previously learned word back into review when you forget it.
+- Request a simple-English explanation adapted to your estimated vocabulary size.
+- Select a phrase or sentence for translation and analyze structurally difficult sentences in the same tooltip.
 
-## Why It Is Built This Way
+## Why it is designed this way
 
-- Lightweight by default, deeper help on demand.
-  Google handles the quick first pass, which is faster and cheaper. You only spend LLM calls when the context really matters.
-- Reading flow stays uninterrupted.
-  Hover lookup, selection translation, pronunciation, and sentence analysis all happen in place.
-- Explanations adapt to your level.
-  The English explanation mode takes your known-word range into account and tries to stay readable.
-- Learner language support is built in.
-  Translation output and extension UI can follow one of the built-in learner languages instead of staying fixed to Chinese.
-- Learning state respects user intent.
-  Frequency rank is only an initial estimate. Explicit Known, Review, and Ignore actions override automatic assumptions.
+- Fast by default, richer on demand: Google handles the quick path; LLM requests are reserved for context-sensitive or explanatory tasks.
+- Stay in the reading flow: lookup, selection translation, pronunciation, review, and sentence analysis happen in-page.
+- Adapt explanation difficulty: English explanations use the learner's known-vocabulary estimate to avoid unnecessary unknown words.
+- Multilingual learner UI: both translations and interface language follow the configured learner language.
 
-## Learning Engine
+The internal A1-C1 labels are vocabulary-size heuristics used to tune explanation difficulty. They are not a formal CEFR assessment.
 
-LexiGlow treats automatic vocabulary detection as a conservative helper rather than an authority:
+## Core capabilities
 
-- **Confidence-based word families.** High-confidence regular forms and safe irregular forms share learning state (`work / worked / working`, `go / went`, `write / written`). Ambiguous lexical forms are deliberately kept separate when merging could corrupt progress (`lives`, `saw`, `left`, `rose`).
-- **Compounds and phrases.** Hyphenated compounds such as `mixed-precision` are treated as lexical units. A curated layer of high-value expressions such as `account for`, `carry out`, and `take into account` can also become learning targets.
-- **Article-local importance.** Repeated unfamiliar words in the current article receive higher visual priority, so frequently recurring vocabulary is easier to notice.
-- **Spaced exposure for relearning.** A Review word starts strongly highlighted, then can soften as exposures accumulate. Well-exposed words can temporarily rest between review intervals and become strong again when due. Explicitly marking a word Known is still the only action that completes relearning.
-- **Low-noise special-term filtering.** Strong identifier, handle, and romanized-name signals can be ignored automatically, but capitalization or word length alone no longer suppresses potentially useful vocabulary.
+- Hover lookup with a quick default Google translation.
+- On-demand contextual LLM translation.
+- OpenAI / Compatible, Gemini, and Claude provider profiles.
+- Known, relearning, and ignored vocabulary states.
+- Familiarity-aware spaced highlight exposure.
+- Simple-English explanations adapted to the learner's estimated level.
+- Selected-word, phrase, sentence, and paragraph translation.
+- UK / US pronunciation metadata and playback.
+- Sentence analysis with clause blocks, source-token highlighting, backbone structure, and translation order.
+- Confidence-based morphology for common inflections and irregular forms while avoiding unsafe merges.
+- Multi-word expression recognition, including inflected phrase variants.
+- Hyphenated compounds treated as lexical units.
+- 15 learner languages: `zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `de`, `es`, `pt-BR`, `ru`, `it`, `tr`, `vi`, `id`, `th`, `ar`.
 
-## Translation And Sentence Analysis
+![LexiGlow workflow from hover lookup to sentence analysis](./assets/lexiglow-workflow.svg)
 
-- Active selections always respect the user's translation intent; automatic proper-name heuristics do not silently block a manually selected phrase.
-- Selection source text and surrounding context are handled separately. The selected source is preserved up to the 1200-character UI limit instead of being silently truncated to the short context window.
-- Context extraction prefers sentence segmentation across inline DOM elements, using `Intl.Segmenter` when available and a punctuation fallback otherwise.
-- Sentence analysis uses indexed source tokens so repeated words such as multiple instances of `that` can be highlighted at the correct occurrence.
-- Structural output is validated before display. Incomplete clause coverage or weak structural signals trigger one stricter retry; a second structurally invalid result is rejected instead of being shown as trustworthy analysis.
-- Single-token grammar highlights are labeled as structural heads (`Subject head`, `Main verb`); full clause relationships are represented by clause blocks.
+## Browser-level regression tests
 
-## Core Features
+In addition to unit tests, the project uses Playwright to launch a real persistent Chromium profile with the MV3 extension loaded. The browser suite exercises the service worker, content script, Shadow DOM tooltip, CSS Highlight API, selections, Popup / Options, dynamic DOM updates, and persisted learning state.
 
-- Hover lookup with a fast default translation
-- On-demand contextual translation when the default answer is not enough
-- Multiple LLM providers: OpenAI / compatible, Gemini, and Claude
-- Double-click to bring forgotten words back into review
-- Familiarity-aware relearning with controlled highlight exposure
-- Simple English explanations tuned to the learner's vocabulary level
-- Selection translation for words, phrases, and full sentences
-- UK / US pronunciation with IPA and click-to-play
-- In-tooltip long-sentence analysis with clause blocks, structure hints, translation, and reasoning steps
-- Persistent learning state for known words, review words, and ignored words
-- Confidence-based inflection and irregular-form mastery
-- Curated multi-word-expression detection
-- Built-in learner-language support for:
-  `zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `de`, `es`, `pt-BR`, `ru`, `it`, `tr`, `vi`, `id`, `th`, `ar`
+The current suite contains 18 user-facing Chromium scenarios, covering known/relearning/ignore flows, inflected phrases, hyphenated compounds, Google ↔ contextual LLM switching, long and overlong selections, sentence-analysis retry and repeated-token positioning, pronunciation controls, Options-driven settings, same-profile browser restart persistence, large-page scrolling, and SPA subtree replacement.
 
-![LexiGlow workflow from hover lookup to sentence analysis](./assets/lexiglow-workflow-en.svg)
+Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness.
 
-## Install And Run
+## Privacy and third-party services
+
+- LLM API keys are kept in extension-origin private storage instead of page-readable translator configuration.
+- Quick translation sends the selected source text to the configured Google Translate endpoint.
+- Contextual translation, English explanations, and sentence analysis send relevant source/context text to the configured LLM provider.
+- LexiGlow does not require those translation requests to pass through a LexiGlow-hosted backend.
+
+If the page contains sensitive information, review the data-processing terms of the translation or LLM provider before sending that content.
+
+## Build and install
 
 ```bash
 npm install
@@ -93,40 +86,32 @@ npm run fetch:lexicon
 npm run build
 ```
 
-Then load it in Chrome:
+Then load the extension in Chrome:
 
-1. Open `chrome://extensions`
-2. Enable `Developer mode`
-3. Click `Load unpacked`
-4. Select the repo root or `dist`
+1. Open `chrome://extensions`.
+2. Enable Developer mode.
+3. Choose Load unpacked.
+4. Select the project root or `dist` output as appropriate for your local workflow.
 
-Recommended quick check:
+Suggested smoke test:
 
-1. Open an English webpage
-2. Hover a highlighted word or supported expression and confirm the tooltip appears
-3. Double-click a word and confirm it can be brought back into review
-4. Select a phrase or sentence and confirm the default translation appears first
-5. Click `Context Translate` and confirm you get a more context-aware result, or a simple English explanation depending on your settings
-6. Click `Sentence Analysis` and confirm the panel shows clause blocks, backbone, translation, and analysis steps
-7. Open the settings page and confirm you can switch learner language plus `OpenAI / Compatible`, `Gemini`, and `Claude`
+1. Open an English page.
+2. Hover a highlighted word and verify the tooltip appears.
+3. Double-click a known word and put it back into review.
+4. Select a phrase or full sentence and verify default translation.
+5. Switch to Context Translate and verify the contextual result or English explanation.
+6. Run Sentence Analysis on a difficult sentence.
+7. Open settings and verify learner-language plus OpenAI / Compatible, Gemini, and Claude configuration.
 
-The A1-C1 labels used for explanation simplicity are vocabulary-count heuristics, not a formal CEFR assessment.
+Known state applies to safe common inflections such as `work / works / worked / working`, while derived forms such as `worker` or `workable` remain independent.
 
-## Quality Gate
+## License and commercial use
 
-Pull requests run reproducible dependency installation, a high-severity dependency audit, lexicon generation, TypeScript typechecking, unit tests, and the production extension build. Browser behavior should still be manually smoke-tested on representative article and SPA pages before a release, especially after changes to content-script interactions.
+LexiGlow uses a source-available license rather than MIT or another conventional permissive open-source license.
 
-## Privacy And Provider Data
-
-LexiGlow reads page text locally to identify English learning targets. Text is sent to a translation or LLM provider only when a translation or analysis request requires it. API keys are kept in extension-origin secret storage rather than exposed in content-script settings. If you configure a third-party or local provider, that provider's own privacy and retention policy applies to text sent to it.
-
-## License And Commercial Use
-
-LexiGlow currently uses a source-available license. It is not MIT and not a traditional permissive open-source license.
-
-- Non-commercial learning, research, testing, and teaching use is allowed
-- Commercial use requires prior written authorization from the author
-- If you modify, port, adapt, or substantially rewrite this project, you must provide clear attribution to the original source
+- Non-commercial learning, research, testing, and educational use is permitted under the project license.
+- Commercial use requires prior written authorization from the rights holder.
+- Modified, ported, translated, or otherwise derivative versions that are substantially based on this project must retain the required attribution.
 
 See:
 
@@ -134,6 +119,4 @@ See:
 - [COMMERCIAL.md](./COMMERCIAL.md)
 - [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)
 
-The bundled/fetched word-frequency data has its own upstream provenance and commercial-use caveat documented in `THIRD_PARTY_NOTICES.md`. A commercial LexiGlow license does not automatically grant separate third-party data rights.
-
-If you want to use LexiGlow in a product, company workflow, paid service, enterprise deployment, or client delivery, contact the rights holder first and verify the third-party data terms as well.
+The bundled word-frequency data has separate upstream rights considerations. A commercial LexiGlow license does not automatically grant commercial rights to that third-party data; review `THIRD_PARTY_NOTICES.md` before commercial distribution.
