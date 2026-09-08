@@ -31,6 +31,7 @@ import {
   looksLikeSpecialTerm,
   removeWordIgnored,
   resolveWordFlags,
+  recordLearningExposure,
   estimateLearnerLevel,
   setWordIgnored,
   setWordMastered,
@@ -360,6 +361,11 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
     };
   }
 
+  const exposureSettings = recordLearningExposure(settings, surface);
+  if (exposureSettings !== settings) {
+    await saveSettings(exposureSettings);
+  }
+
   try {
     const partOfSpeechPromise = lookupDictionaryPartOfSpeech({ lemma, surface });
     const translatorSettings = provider === "llm" ? await getTranslatorSettings() : null;
@@ -556,15 +562,6 @@ async function handleTranslateSelection(
     return {
       text,
       translation: ui(translatorSettings.learnerLanguageCode, "tooltipTranslationUnavailable"),
-      translationProvider: message.payload.provider === "llm" ? "llm" : "google-web",
-      cached: false,
-    };
-  }
-
-  if (shouldPreserveSelectionText(text, contextText)) {
-    return {
-      text,
-      translation: text,
       translationProvider: message.payload.provider === "llm" ? "llm" : "google-web",
       cached: false,
     };
