@@ -170,7 +170,7 @@ test("a user can switch the same lookup from Google to contextual LLM and back",
   await expect(page.locator(".wordwise-primary-translation")).toContainText("快速译文");
 });
 
-test("overlong selections show a limit message without sending translation traffic", async ({
+test("overlong selections keep limit feedback visible without sending translation traffic", async ({
   context,
   page,
 }) => {
@@ -190,6 +190,8 @@ test("overlong selections show a limit message without sending translation traff
   await serveTestPage(context, page, `<p id="selection">${longSelection}</p>`);
   await selectElementText(page, "#selection");
 
-  await expect(page.getByText("划选内容过长，请控制在 1200 个字符以内。", { exact: true })).toBeVisible();
+  const hint = page.getByText("划选内容过长，请控制在 1200 个字符以内。", { exact: true });
+  await expect(hint).toBeVisible();
+  expect(await hint.evaluate((element) => getComputedStyle(element.parentElement!).display)).not.toBe("none");
   expect(translationCalls).toBe(0);
 });
