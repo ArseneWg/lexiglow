@@ -139,11 +139,11 @@ test("pronunciation controls render accent data and dispatch the requested US sp
   await serveTestPage(context, page, '<p>We study <span id="target">obfuscation</span> carefully.</p>');
   await page.locator("#target").hover();
 
-  await expect(page.getByTitle("播放英式发音")).toBeVisible();
-  await expect(page.getByTitle("播放美式发音")).toBeVisible();
-  await expect(page.locator(".wordwise-pronunciation")).toContainText("/ɒbfʌs'keiʃən/");
+  await expect(page.getByLabel("播放英式发音")).toBeVisible();
+  await expect(page.getByLabel("播放美式发音")).toBeVisible();
+  await expect(page.locator(".wordwise-pronunciation")).toContainText("/ˌɒbfʌsˈkeiʃən/");
 
-  await page.getByTitle("播放美式发音").click();
+  await page.getByLabel("播放美式发音").click();
   await expect.poll(async () => {
     return extensionWorker.evaluate(() => {
       const state = globalThis as typeof globalThis & {
@@ -175,12 +175,23 @@ test("extension runtime reload preserves learning state and restores content beh
   await page.waitForTimeout(250);
   expect(await getHighlightTexts(page)).not.toContain("obfuscation");
 
-  const nextWorkerPromise = context.waitForEvent("serviceworker", { timeout: 10_000 });
   await extensionWorker.evaluate(() => chrome.runtime.reload());
+  await page.waitForTimeout(250);
   await page.reload({ waitUntil: "domcontentloaded" });
-  const reloadedWorker = await nextWorkerPromise;
 
-  const settings = await readUserSettings(reloadedWorker);
+  await expect.poll(async () => {
+    const worker = context.serviceWorkers().at(-1);
+    if (!worker) return false;
+    try {
+      return await worker.evaluate(() => Boolean(chrome.runtime?.id));
+    } catch {
+      return false;
+    }
+  }, { timeout: 10_000 }).toBe(true);
+
+  const reloadedWorker = context.serviceWorkers().at(-1);
+  expect(reloadedWorker).toBeDefined();
+  const settings = await readUserSettings(reloadedWorker!);
   expect(settings?.masteredOverrides).toEqual(expect.arrayContaining(["obfuscation"]));
   await page.waitForTimeout(300);
   expect(await getHighlightTexts(page)).not.toContain("obfuscation");
