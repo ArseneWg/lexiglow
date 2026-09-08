@@ -4,24 +4,46 @@ import { expect, test } from "../fixtures";
 import { clearExtensionStorage, mockGoogleTranslation, seedUserSettings } from "../helpers";
 
 async function selectWord(page: Page, word: string): Promise<boolean> {
-  return page.evaluate((target) => {
+  return page.evaluate(async (target) => {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode() as Text | null;
     const pattern = new RegExp("\\b" + target + "\\b", "i");
+
     while (node) {
       const parent = node.parentElement;
       if (parent && !parent.closest("script, style, noscript, input, textarea, select, option, code, pre")) {
         const match = (node.textContent || "").match(pattern);
-        if (match && match.index !== undefined) {
+        const style = getComputedStyle(parent);
+        const parentRect = parent.getBoundingClientRect();
+        const visible =
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || "1") > 0 &&
+          parentRect.width > 0 &&
+          parentRect.height > 0;
+
+        if (visible && match && match.index !== undefined) {
+          parent.scrollIntoView({ block: "center", inline: "nearest" });
+          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
           const range = document.createRange();
           range.setStart(node, match.index);
           range.setEnd(node, match.index + match[0].length);
+          const rect = range.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) {
+            node = walker.nextNode() as Text | null;
+            continue;
+          }
+
           const selection = window.getSelection();
           selection?.removeAllRanges();
           selection?.addRange(range);
           document.dispatchEvent(new Event("selectionchange"));
-          const rect = range.getBoundingClientRect();
-          parent.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));
+          document.dispatchEvent(new MouseEvent("mouseup", {
+            bubbles: true,
+            clientX: rect.left + Math.min(4, rect.width / 2),
+            clientY: rect.top + Math.min(4, rect.height / 2),
+          }));
           return true;
         }
       }

@@ -84,11 +84,21 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 
 ![LexiGlow workflow from hover lookup to sentence analysis](./assets/lexiglow-workflow.svg)
 
+## 发音准确性
+
+- 用户主动选中的单个英文词会直接进入发音解析；词组和整句仍保持翻译/分析流程，不伪造单词 IPA。
+- 发音解析基于 `surface + context + POS`。`record / refuse / lead / read / live / use` 等同形异音词只有在语境足够明确时才自动选择 reading；无法确定时禁用自动播放，不盲猜。
+- Kaikki/Wiktextract 的 IPA、audio、audio-IPA、口音与词性保持为同一个 pronunciation variant，避免把不同 reading 的 IPA 和录音拼在一起。
+- 匹配 reading 的真人 lexical audio 优先于 Chrome TTS；TTS 只作为 fallback，并且始终朗读用户选中的 exact surface。
+- `blocks / dogs / buses / looked / played / wanted` 等规则词形可根据 base phoneme 高置信推导 `/s z ɪz/` 或 `/t d ɪd/`，但绝不复用 base-word audio 冒充变形词录音。
+- IPA 按来源原样展示，不再做 DJ-style 破坏性转换；generic / Canadian 数据不会被冒充标记为 US / UK。
+- 离线 fallback 固定 CMUdict 与 Britfone revision，只打包高频 top 5,000 + 明确 edge-case 词；更低频词继续优先实时结构化数据和 exact-surface TTS，避免 MV3 service worker 体积无界增长。
+
 ## 浏览器级回归测试
 
 项目除了单元测试外，还会用 Playwright 启动真实的 Chromium persistent profile，并加载 MV3 扩展运行浏览器 E2E。测试覆盖真正的 service worker、content script、Shadow DOM tooltip、CSS Highlight API、Selection / Range、Popup / Options、动态 DOM 和本地持久化状态。
 
-当前共有 **24 条 Chromium 用户流程**，除原有阅读流覆盖外，还新增数据备份恢复、网络失败与异步竞态场景，包括：
+当前共有 **30 条 Chromium 用户流程**，除原有阅读流覆盖外，还新增数据备份恢复、网络失败与异步竞态场景，包括：
 
 - 悬停翻译 → 已掌握 → 刷新后保持状态
 - 双击已掌握词 → 继续学习 / spaced relearning
@@ -113,7 +123,7 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 - 慢返回的旧 hover 请求不能覆盖新词 tooltip
 - 用户关闭 selection tooltip 后，迟到的 LLM 响应不能把 UI 重新弹出来
 
-当前验证基线为 **16 个 Vitest 文件 / 148 条单元测试 + 24 / 24 条 Playwright Chromium 扩展 E2E**。翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。E2E 失败时会保留 trace、截图、HTML 报告和测试结果 diagnostics。另有独立、非阻塞的真实公网 Site Smoke 持续覆盖 GitHub、Hacker News、MDN、web.dev、React 文档，以及 CI 出口未被限制时的 Reddit。
+当前验证基线为 **17 个 Vitest 文件 / 158 条单元测试 + 30 / 30 条 Playwright Chromium 扩展 E2E**。翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。E2E 失败时会保留 trace、截图、HTML 报告和测试结果 diagnostics。另有独立、非阻塞的真实公网 Site Smoke 持续覆盖 GitHub、Hacker News、MDN、web.dev、React 文档，以及 CI 出口未被限制时的 Reddit。
 
 ## 长期数据安全与发布产物
 
@@ -161,7 +171,7 @@ npm run build
 
 ## 质量门
 
-PR 会执行可复现依赖安装、高危依赖审计、词表生成、TypeScript 类型检查、148 条单元测试、生产构建、两次 release 打包 SHA 一致性校验，以及 24 条真实 Chromium 扩展 E2E。E2E 失败时会保留 trace、截图和 HTML diagnostics；独立 Site Smoke 继续提供真实公网兼容性预警，正式发布前仍建议做一次人工视觉/交互 smoke test。
+PR 会执行可复现依赖安装、高危依赖审计、词表生成、TypeScript 类型检查、158 条单元测试、生产构建、两次 release 打包 SHA 一致性校验，以及 30 条真实 Chromium 扩展 E2E。E2E 失败时会保留 trace、截图和 HTML diagnostics；独立 Site Smoke 继续提供真实公网兼容性预警，正式发布前仍建议做一次人工视觉/交互 smoke test。
 
 ## 许可证与商用
 
