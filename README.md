@@ -112,6 +112,10 @@ Recommended quick check:
 
 The A1-C1 labels used for explanation simplicity are vocabulary-count heuristics, not a formal CEFR assessment.
 
+## Quality Gate
+
+Pull requests run reproducible dependency installation, a high-severity dependency audit, lexicon generation, TypeScript typechecking, unit tests, and the production extension build. Browser behavior should still be manually smoke-tested on representative article and SPA pages before a release, especially after changes to content-script interactions.
+
 ## Privacy And Provider Data
 
 LexiGlow reads page text locally to identify English learning targets. Text is sent to a translation or LLM provider only when a translation or analysis request requires it. API keys are kept in extension-origin secret storage rather than exposed in content-script settings. If you configure a third-party or local provider, that provider's own privacy and retention policy applies to text sent to it.
