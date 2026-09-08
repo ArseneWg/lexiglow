@@ -74,13 +74,81 @@ jobs:
             'function stripIpaDelimiters(value: string | undefined): string {\n  return (value || "").trim().replace(/^[/[]+|[/\\]]+$/g, "");\n}',
             'function stripIpaDelimiters(value: string | undefined): string {\n  const trimmed = (value || "").trim();\n  if ((trimmed.startsWith("/") && trimmed.endsWith("/")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {\n    return trimmed.slice(1, -1);\n  }\n  return trimmed;\n}',
           )
+          text = text.replace(
+            'if (/\\b(?:us|u\\.s\\.|general american|american|united states|canada|canadian)\\b/.test(text)) return "en-US";',
+            'if (/\\b(?:us|u\\.s\\.|general american|american|united states)\\b/.test(text)) return "en-US";',
+          )
+          text = text.replace(
+            '.filter((variant) => variant.accent === accent || variant.accent === "en")',
+            '.filter((variant) => variant.accent === accent)',
+          )
+          text = text.replace(
+            '(candidate.accent === variant.accent || candidate.accent === "en") &&',
+            'candidate.accent === variant.accent &&',
+          )
+          text = text.replace(
+            'audio: audioUrl ? { url: audioUrl, audioIpa: audioIpa || undefined } : undefined,',
+            'audio: audioUrl ? {\n          url: audioUrl,\n          audioIpa: audioIpa || undefined,\n          sourcePage: typeof sound.audio === "string" && sound.audio.trim()\n            ? `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(sound.audio.trim().replace(/ /g, "_"))}`\n            : undefined,\n        } : undefined,',
+          )
           resolver.write_text(text)
 
-          for path_name in ['e2e/sites/pronunciation-sites.spec.ts', 'e2e/sites/pronunciation-live-source.spec.ts']:
-            path = Path(path_name)
-            text = path.read_text()
-            text = text.replace('parent.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));', 'document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));')
-            path.write_text(text)
+          content = Path('src/content/index.ts')
+          text = content.read_text()
+          text = text.replace(
+            '  activePronunciationResult = null;\n  tooltip.britishPhoneticEl.textContent = "/.../";\n  tooltip.americanPhoneticEl.textContent = "/.../";\n}',
+            '  activePronunciationResult = null;\n  tooltip.britishButton.disabled = true;\n  tooltip.americanButton.disabled = true;\n  tooltip.britishPhoneticEl.textContent = "/.../";\n  tooltip.americanPhoneticEl.textContent = "/.../";\n}',
+          )
+          text = text.replace(
+            '  if (response.result?.confidence === "ambiguous") {\n    tooltip.britishPhoneticEl.textContent = "Multiple pronunciations";\n    tooltip.americanPhoneticEl.textContent = "Multiple pronunciations";\n    return;\n  }\n  tooltip.britishPhoneticEl.textContent',
+            '  if (response.result?.confidence === "ambiguous") {\n    tooltip.britishButton.disabled = true;\n    tooltip.americanButton.disabled = true;\n    tooltip.britishPhoneticEl.textContent = "Multiple pronunciations";\n    tooltip.americanPhoneticEl.textContent = "Multiple pronunciations";\n    return;\n  }\n  tooltip.britishButton.disabled = false;\n  tooltip.americanButton.disabled = false;\n  tooltip.britishPhoneticEl.textContent',
+          )
+          text = text.replace(
+            '  .wordwise-pronunciation-action:hover {\n    color: #c2410c;\n  }',
+            '  .wordwise-pronunciation-action:hover {\n    color: #c2410c;\n  }\n  .wordwise-pronunciation-action:disabled {\n    opacity: 0.42;\n    cursor: wait;\n  }',
+          )
+          content.write_text(text)
+
+          settings = Path('e2e/settings-resilience.spec.ts')
+          text = settings.read_text()
+          start = text.find('  await context.route("https://api.dictionaryapi.dev/api/v2/entries/en/obfuscation"')
+          end = text.find('\n\n  await extensionWorker.evaluate', start)
+          if start >= 0 and end >= 0:
+            replacement = '''  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route) => {\n    await route.fulfill({\n      status: 200,\n      contentType: "application/jsonl",\n      body: JSON.stringify({\n        word: "obfuscation",\n        pos: "noun",\n        sounds: [\n          { tags: ["UK"], ipa: "/ˌɒbfʌsˈkeɪʃən/" },\n          { tags: ["US"], ipa: "/ˌɑːbfəsˈkeɪʃən/" },\n        ],\n      }),\n    });\n  });'''
+            text = text[:start] + replacement + text[end:]
+          text = text.replace('/ˌɒbfʌsˈkeiʃən/', '/ˌɒbfʌsˈkeɪʃən/')
+          settings.write_text(text)
+
+          live = Path('e2e/sites/pronunciation-live-source.spec.ts')
+          text = live.read_text()
+          text = text.replace(
+            '  expect(response?.status() ?? 200).toBeLessThan(400);\n  expect(await selectFirstWord(page, "component")).toBe(true);',
+            '  expect(response?.status() ?? 200).toBeLessThan(400);\n  await page.waitForTimeout(600);\n  expect(await selectFirstWord(page, "component")).toBe(true);',
+          )
+          live.write_text(text)
+
+          browser = Path('e2e/pronunciation-accuracy.spec.ts')
+          text = browser.read_text()
+          text = text.replace(
+            'async function routePronunciation(context: Parameters<typeof test>[0] extends never ? never : any, word: string, withAudio = false) {',
+            'async function routePronunciation(context: Parameters<typeof test>[0] extends never ? never : any, word: string, withAudio = false, delayMs = 0) {',
+          )
+          text = text.replace(
+            '  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route: any) => {\n    const audio = withAudio',
+            '  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route: any) => {\n    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));\n    const audio = withAudio',
+          )
+          marker = 'test("multi-word selection keeps pronunciation controls hidden"'
+          if 'keeps playback disabled until pronunciation lookup resolves' not in text and marker in text:
+            test_block = '''test("keeps playback disabled until pronunciation lookup resolves", async ({ context, page }) => {\n  await mockGoogleTranslation(context, "混淆");\n  await routePronunciation(context, "obfuscation", true, 500);\n  await serveTestPage(context, page, '<p>I study <span id="target">obfuscation</span> carefully.</p>');\n  await selectElementText(page, "#target");\n  const usButton = page.getByLabel("播放美式发音");\n  await expect(usButton).toBeVisible();\n  await expect(usButton).toBeDisabled();\n  await expect(usButton).toBeEnabled({ timeout: 3_000 });\n});\n\n'''
+            text = text.replace(marker, test_block + marker)
+          browser.write_text(text)
+
+          unit = Path('tests/pronunciationResolver.test.ts')
+          text = unit.read_text()
+          marker = '  test("returns the explicitly selected accent variant"'
+          if 'does not relabel generic or Canadian pronunciation as US or UK' not in text and marker in text:
+            block = '''  test("does not relabel generic or Canadian pronunciation as US or UK", async () => {\n    const generic = extractKaikkiPronunciationVariants(\n      JSON.stringify({ word: "foobar", sounds: [{ tags: ["Canada"], ipa: "/ˈfuːbɑr/" }] }),\n      "foobar",\n    );\n    expect(generic[0]?.accent).toBe("en");\n\n    const fetchMock = vi.fn(async () => ({\n      ok: true,\n      text: async () => JSON.stringify({ word: "foobar", sounds: [{ ipa: "/ˈfuːbɑr/" }] }),\n    }));\n    const result = await resolvePronunciation("foobar", { fetchFn: fetchMock as never });\n    expect(result.selectedVariantIds).toEqual({});\n    expect(result.ukPhonetic).toBeUndefined();\n    expect(result.usPhonetic).toBeUndefined();\n    expect(result.ttsAllowed).toBe(true);\n  });\n\n'''
+            text = text.replace(marker, block + marker)
+          unit.write_text(text)
           PY
 
       - name: Commit generated refactor
@@ -93,5 +161,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src scripts e2e tests package.json THIRD_PARTY_NOTICES.md README.md
-          git commit -m "Refactor pronunciation accuracy pipeline"
+          git commit -m "Refine pronunciation correctness safeguards"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
