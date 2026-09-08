@@ -67,7 +67,7 @@ In addition to unit tests, the project uses Playwright to launch a real persiste
 
 The current suite contains 18 user-facing Chromium scenarios, covering known/relearning/ignore flows, inflected phrases, hyphenated compounds, Google ↔ contextual LLM switching, long and overlong selections, sentence-analysis retry and repeated-token positioning, pronunciation controls, Options-driven settings, same-profile browser restart persistence, large-page scrolling, and SPA subtree replacement.
 
-Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness.
+Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness. Failed E2E runs retain Playwright traces, screenshots, HTML reports, and test-result diagnostics for investigation.
 
 ## Privacy and third-party services
 
