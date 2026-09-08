@@ -190,6 +190,7 @@ test("overlong selections keep limit feedback visible without sending translatio
   await serveTestPage(context, page, `<p id="selection">${longSelection}</p>`);
   await selectElementText(page, "#selection");
 
+  await expect(page.locator(".wordwise-translation")).toBeVisible();
   const hint = page.getByText("划选内容过长，请控制在 1200 个字符以内。", { exact: true });
   await expect(hint).toBeVisible();
   expect(await hint.evaluate((element) => getComputedStyle(element.parentElement!).display)).not.toBe("none");
