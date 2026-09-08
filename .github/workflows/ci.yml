@@ -23,6 +23,16 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Refresh dependency lockfile
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Upload refreshed lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: refreshed-package-lock
+          path: package-lock.json
+          retention-days: 1
+
       - name: Install dependencies
         run: npm ci
 
