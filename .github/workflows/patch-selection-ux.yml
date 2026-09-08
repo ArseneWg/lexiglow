@@ -1,0 +1,107 @@
+name: Patch selection UX
+
+on:
+  push:
+    branches: [fix/review-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/review-hardening
+      - name: Apply UX patches
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          content_path = Path('src/content/index.ts')
+          text = content_path.read_text()
+          text = text.replace(
+            '  isEnglishSelectionText,\n  isSingleEnglishWord,',
+            '  isEnglishSelectionText,\n  isSingleEnglishWord,\n  MAX_SELECTION_TEXT_LENGTH,',
+          )
+          text = text.replace(
+            '  normalizeSingleEnglishWord,\n} from "../shared/word";',
+            '  normalizeSingleEnglishWord,\n  validateEnglishSelectionText,\n} from "../shared/word";',
+          )
+          text = text.replace('const HIGHLIGHT_NAME = "wordwise-pending";\nconst HIGHLIGHT_SCAN_LIMIT = 1200;\n', '')
+
+          marker = 'async function updateSelectionAnalysisTrigger() {'
+          helper = r'''function showOverlongSelectionHint(): boolean {
+            const selection = window.getSelection();
+            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+
+            const text = normalizeSelectionText(selection.toString());
+            if (validateEnglishSelectionText(text) !== "tooLong") return false;
+
+            const range = selection.getRangeAt(0).cloneRange();
+            if (shouldIgnoreSelectionRange(range)) return false;
+            const rect = range.getBoundingClientRect();
+            if ((!rect.width && !rect.height) || !isFinite(rect.left) || !isFinite(rect.top)) return false;
+
+            selectionRequestId += 1;
+            hideSentenceAnalysis();
+            renderSelectionTooltip({
+              text: "",
+              rect,
+              requestId: selectionRequestId,
+              contextText: "",
+              selectedFontSizePx: resolveSelectionFontSizePx(range),
+            });
+            activeSelectionTooltipContext = null;
+            activeSelectionContext = null;
+            tooltip.translationEl.dataset.visible = "false";
+            tooltip.metaEl.style.display = "none";
+            tooltip.llmButton.style.display = "none";
+            tooltip.selectionAnalysisButton.style.display = "none";
+            tooltip.hintEl.dataset.visible = "true";
+            tooltip.hintEl.dataset.loading = "false";
+            tooltip.hintEl.dataset.kind = "status";
+            tooltip.hintEl.textContent = ui("tooltipSelectionTooLong", { limit: MAX_SELECTION_TEXT_LENGTH });
+            positionTooltip(rect);
+            return true;
+          }
+
+          '''
+          if helper not in text:
+            text = text.replace(marker, helper + marker)
+          text = text.replace(
+            '  const settings = await ensureSettings();\n  const selectedWordContext',
+            '  const settings = await ensureSettings();\n  if (showOverlongSelectionHint()) return;\n  const selectedWordContext',
+          )
+          content_path.write_text(text)
+
+          i18n_path = Path('src/shared/i18n.ts')
+          i18n = i18n_path.read_text()
+          i18n = i18n.replace('optionsTitle: "WordWise Settings"', 'optionsTitle: "LexiGlow Settings"')
+          i18n = i18n.replace('optionsTitle: "WordWise 设置"', 'optionsTitle: "LexiGlow 设置"')
+          i18n = i18n.replace('highlightSubject: "Subject"', 'highlightSubject: "Subject head"')
+          i18n = i18n.replace('highlightPredicate: "Predicate"', 'highlightPredicate: "Main verb"')
+          i18n = i18n.replace('highlightSubject: "主语"', 'highlightSubject: "主语中心词"')
+          i18n = i18n.replace('highlightPredicate: "谓语"', 'highlightPredicate: "主句谓语"')
+          i18n = i18n.replace(
+            'tooltipShortSelectionHint: "This selection is too short. Direct translation is better.",',
+            'tooltipShortSelectionHint: "Select at least three English words for sentence analysis.",\n  tooltipSelectionTooLong: "This selection is too long. Select up to {limit} characters.",',
+          )
+          i18n = i18n.replace(
+            'tooltipShortSelectionHint: "这段内容太短，更适合直接看翻译。",',
+            'tooltipShortSelectionHint: "长难句分析至少选择 3 个英文词。",\n    tooltipSelectionTooLong: "划选内容过长，请控制在 {limit} 个字符以内。",',
+          )
+          i18n_path.write_text(i18n)
+          PY
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/patch-selection-ux.yml
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Improve selection validation UX"
+          git push origin HEAD:fix/review-hardening
