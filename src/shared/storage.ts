@@ -226,7 +226,10 @@ export async function getSettings(): Promise<UserSettings> {
 
   if (localSettings) {
     const sanitized = sanitizeSettings(localSettings);
-    if (localSettings.schemaVersion !== CURRENT_USER_SETTINGS_SCHEMA_VERSION) {
+    const storedSchemaVersion = typeof localSettings.schemaVersion === "number"
+      ? localSettings.schemaVersion
+      : 0;
+    if (storedSchemaVersion < CURRENT_USER_SETTINGS_SCHEMA_VERSION) {
       await chrome.storage.local.set({
         [STORAGE_SETTINGS_KEY]: sanitized,
       });
