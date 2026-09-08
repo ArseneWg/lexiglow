@@ -4,7 +4,7 @@ export interface WordAtOffset {
   end: number;
 }
 
-const ENGLISH_TOKEN_SOURCE = "[A-Za-z]+(?:'[A-Za-z]+)?";
+const ENGLISH_TOKEN_SOURCE = "[A-Za-z]+(?:['’][A-Za-z]+)?";
 const ENGLISH_WORD_RE = new RegExp(`^${ENGLISH_TOKEN_SOURCE}$`);
 const MAX_SELECTION_TEXT_LENGTH = 1200;
 
@@ -13,7 +13,10 @@ export function createEnglishTokenMatcher(): RegExp {
 }
 
 export function normalizeSingleEnglishWord(surface: string): string {
-  const compact = surface.trim().replace(/^[^A-Za-z'-]+|[^A-Za-z'-]+$/g, "");
+  const compact = surface
+    .trim()
+    .replace(/^[^A-Za-z'’-]+|[^A-Za-z'’-]+$/g, "")
+    .replace(/’/g, "'");
   return ENGLISH_WORD_RE.test(compact) ? compact : "";
 }
 
@@ -32,14 +35,14 @@ function isStructuralTechnicalBoundaryCharacter(char: string | undefined): boole
 function isHyphenLinkedToTechnicalToken(text: string, start: number, end: number): boolean {
   if (text[end] === "-") {
     const trailing = text.slice(end + 1, Math.min(text.length, end + 24));
-    if (/^[A-Za-z'-]*[@_\\/]/u.test(trailing)) {
+    if (/^[A-Za-z'’-]*[@_\\/]/u.test(trailing)) {
       return true;
     }
   }
 
   if (text[start - 1] === "-") {
     const leading = text.slice(Math.max(0, start - 24), start - 1);
-    if (/[@_\\/][A-Za-z'-]*$/u.test(leading)) {
+    if (/[@_\\/][A-Za-z'’-]*$/u.test(leading)) {
       return true;
     }
   }
@@ -96,7 +99,7 @@ function isLikelyHandleOrTagOnlySelection(text: string): boolean {
     return false;
   }
 
-  const stripped = compact.replace(/[()[\]{}"'`.,!?;:]+/g, " ").replace(/\s+/g, " ").trim();
+  const stripped = compact.replace(/[()[\]{}"'’`.,!?;:]+/g, " ").replace(/\s+/g, " ").trim();
 
   if (!stripped) {
     return false;
@@ -129,7 +132,7 @@ export function isEnglishSelectionText(text: string): boolean {
     return false;
   }
 
-  if (!/[A-Za-z]+(?:'[A-Za-z]+)?/.test(compact)) {
+  if (!/[A-Za-z]+(?:['’][A-Za-z]+)?/.test(compact)) {
     return false;
   }
 
