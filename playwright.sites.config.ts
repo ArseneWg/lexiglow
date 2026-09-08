@@ -1,18 +1,18 @@
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  testDir: "./e2e",
-  testIgnore: ["**/sites/**"],
+  testDir: "./e2e/sites",
   fullyParallel: false,
   workers: 1,
-  timeout: 30_000,
+  retries: process.env.CI ? 1 : 0,
+  timeout: 45_000,
   expect: {
-    timeout: 6_000,
+    timeout: 10_000,
   },
   reporter: process.env.CI
     ? [
         ["line"],
-        ["html", { outputFolder: "playwright-report", open: "never" }],
+        ["html", { outputFolder: "playwright-site-report", open: "never" }],
       ]
     : [["list"]],
   use: {
@@ -20,5 +20,5 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  outputDir: "test-results/e2e",
+  outputDir: "test-results/site-smoke",
 });

@@ -11,7 +11,8 @@
     "prepare:lexicon": "node scripts/build-lexicon.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:sites": "playwright test --config=playwright.sites.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
