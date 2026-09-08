@@ -4,7 +4,7 @@ import { getHighlightIntensity } from "../shared/settings";
 import { createEnglishTokenMatcher } from "../shared/word";
 import type { HighlightIntensity, UserSettings } from "../shared/types";
 
-export const PENDING_HIGHLIGHT_NAMES: Record<HighlightIntensity, string> = {
+export const PENDING_HIGHLIGHT_NAMES: Record<Exclude<HighlightIntensity, "none">, string> = {
   strong: "wordwise-pending-strong",
   normal: "wordwise-pending",
   weak: "wordwise-pending-weak",
@@ -222,7 +222,7 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
 
   function addRange(
     ranges: NodeRanges,
-    intensity: HighlightIntensity,
+    intensity: Exclude<HighlightIntensity, "none">,
     node: Text,
     start: number,
     end: number,
@@ -318,6 +318,9 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
         continue;
       }
       const intensity = getHighlightIntensity(settings, candidate.surface, articleOccurrences);
+      if (intensity === "none") {
+        continue;
+      }
       const added = addRange(
         ranges,
         intensity,

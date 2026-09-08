@@ -313,15 +313,20 @@ export function getHighlightIntensity(
   const progress = key ? settings.learningProgress[key] : undefined;
 
   if (progress?.status === "learning") {
-    if (progress.exposures <= 1 || (progress.nextReviewAt ?? 0) <= Date.now()) {
+    const due = (progress.nextReviewAt ?? 0) <= Date.now();
+    if (due || progress.exposures <= 1) {
       return "strong";
     }
-    if (progress.exposures >= 5 || progress.familiarity >= 0.65) {
-      return "weak";
+
+    if (progress.exposures >= 6 && progress.familiarity >= 0.75) {
+      return articleOccurrences >= 3 ? "weak" : "none";
     }
+    if (progress.exposures >= 4 || progress.familiarity >= 0.55) {
+      return articleOccurrences >= 3 ? "normal" : "weak";
+    }
+    return articleOccurrences >= 3 ? "strong" : "normal";
   }
 
-  // Repeated words in the current article are higher-value learning targets.
   return articleOccurrences >= 3 ? "strong" : "normal";
 }
 
