@@ -29,12 +29,24 @@ interface NodeRanges {
   weak: Range[];
 }
 
+interface Candidate {
+  surface: string;
+  key: string;
+  start: number;
+  end: number;
+  phrasePriority?: 1 | 2 | 3;
+}
+
 const MAX_TOTAL_RANGES = 1800;
 const MAX_NODES_PER_CHUNK = 120;
 const MAX_CHUNK_MS = 8;
 
 function supportsHighlights(): boolean {
   return typeof CSS !== "undefined" && "highlights" in CSS && typeof Highlight !== "undefined";
+}
+
+function rangeSize(ranges?: NodeRanges): number {
+  return ranges ? ranges.strong.length + ranges.normal.length + ranges.weak.length : 0;
 }
 
 function createEmptyRanges(): NodeRanges {
@@ -62,17 +74,45 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
   const nodeRanges = new Map<Text, NodeRanges>();
   const queuedNodes = new Set<Text>();
   const articleCounts = new Map<string, number>();
+  const nodeOccurrenceCounts = new Map<Text, Map<string, number>>();
   const nodesByKey = new Map<string, Set<Text>>();
+  const viewportNodes = new Map<Element, Set<Text>>();
   let fullScanWalker: TreeWalker | null = null;
   let processing = false;
   let generation = 0;
+  let totalRangeCount = 0;
 
-  function totalRanges(): number {
-    let total = 0;
-    for (const ranges of nodeRanges.values()) {
-      total += ranges.strong.length + ranges.normal.length + ranges.weak.length;
+  const viewportObserver = typeof IntersectionObserver === "undefined"
+    ? null
+    : new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting && entry.intersectionRatio <= 0) {
+            continue;
+          }
+          const element = entry.target as Element;
+          const nodes = viewportNodes.get(element);
+          if (!nodes) {
+            continue;
+          }
+          for (const node of nodes) {
+            if (node.isConnected) {
+              queuedNodes.add(node);
+            }
+          }
+          viewportNodes.delete(element);
+          viewportObserver?.unobserve(element);
+        }
+        scheduleProcessing();
+      }, { rootMargin: "600px 0px" });
+
+  function replaceNodeRanges(node: Text, next?: NodeRanges) {
+    totalRangeCount -= rangeSize(nodeRanges.get(node));
+    if (next && rangeSize(next)) {
+      nodeRanges.set(node, next);
+      totalRangeCount += rangeSize(next);
+    } else {
+      nodeRanges.delete(node);
     }
-    return total;
   }
 
   function publishHighlights() {
@@ -84,9 +124,10 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
     const normal = new Highlight();
     const weak = new Highlight();
 
-    for (const [node, ranges] of nodeRanges) {
+    for (const [node, ranges] of [...nodeRanges]) {
       if (!node.isConnected) {
-        nodeRanges.delete(node);
+        replaceNodeRanges(node);
+        updateNodeOccurrences(node, new Map());
         continue;
       }
       for (const range of ranges.strong) strong.add(range);
@@ -102,10 +143,15 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
   function clear() {
     generation += 1;
     fullScanWalker = null;
+    processing = false;
+    totalRangeCount = 0;
     queuedNodes.clear();
     nodeRanges.clear();
     articleCounts.clear();
+    nodeOccurrenceCounts.clear();
     nodesByKey.clear();
+    viewportNodes.clear();
+    viewportObserver?.disconnect();
     if (supportsHighlights()) {
       for (const name of Object.values(PENDING_HIGHLIGHT_NAMES)) {
         CSS.highlights.delete(name);
@@ -113,28 +159,55 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
     }
   }
 
-  function rememberKeyNode(key: string, node: Text) {
-    let nodes = nodesByKey.get(key);
-    if (!nodes) {
-      nodes = new Set<Text>();
-      nodesByKey.set(key, nodes);
-    }
-    nodes.add(node);
-  }
+  function updateNodeOccurrences(node: Text, next: Map<string, number>) {
+    const previous = nodeOccurrenceCounts.get(node) ?? new Map<string, number>();
+    const keys = new Set([...previous.keys(), ...next.keys()]);
 
-  function incrementArticleCount(key: string, node: Text): number {
-    const next = (articleCounts.get(key) ?? 0) + 1;
-    articleCounts.set(key, next);
-    rememberKeyNode(key, node);
+    for (const key of keys) {
+      const beforeNode = previous.get(key) ?? 0;
+      const afterNode = next.get(key) ?? 0;
+      const delta = afterNode - beforeNode;
+      if (!delta) {
+        continue;
+      }
 
-    // When a word becomes locally repeated, re-evaluate earlier occurrences so
-    // the visual priority upgrades consistently across the article.
-    if (next === 3) {
-      for (const relatedNode of nodesByKey.get(key) ?? []) {
-        queuedNodes.add(relatedNode);
+      const beforeArticle = articleCounts.get(key) ?? 0;
+      const afterArticle = Math.max(0, beforeArticle + delta);
+      if (afterArticle) {
+        articleCounts.set(key, afterArticle);
+      } else {
+        articleCounts.delete(key);
+      }
+
+      let relatedNodes = nodesByKey.get(key);
+      if (afterNode > 0) {
+        relatedNodes ??= new Set<Text>();
+        relatedNodes.add(node);
+        nodesByKey.set(key, relatedNodes);
+      } else if (relatedNodes) {
+        relatedNodes.delete(node);
+        if (!relatedNodes.size) {
+          nodesByKey.delete(key);
+        }
+      }
+
+      // Article-local repetition is a learning-priority signal. Upgrade earlier
+      // occurrences once when the real occurrence count crosses the threshold;
+      // reprocessing the same node has delta=0 and cannot inflate this count.
+      if (beforeArticle < 3 && afterArticle >= 3) {
+        for (const relatedNode of nodesByKey.get(key) ?? []) {
+          if (relatedNode !== node) {
+            queuedNodes.add(relatedNode);
+          }
+        }
       }
     }
-    return next;
+
+    if (next.size) {
+      nodeOccurrenceCounts.set(node, next);
+    } else {
+      nodeOccurrenceCounts.delete(node);
+    }
   }
 
   function makeRange(node: Text, start: number, end: number): Range | null {
@@ -153,26 +226,34 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
     node: Text,
     start: number,
     end: number,
-  ) {
-    const range = makeRange(node, start, end);
-    if (range) {
-      ranges[intensity].push(range);
+    available: number,
+  ): number {
+    if (available <= 0) {
+      return 0;
     }
+    const range = makeRange(node, start, end);
+    if (!range) {
+      return 0;
+    }
+    ranges[intensity].push(range);
+    return 1;
   }
 
   async function processNode(node: Text, settings: UserSettings) {
     if (!node.isConnected || options.shouldSkipTextNode(node)) {
-      nodeRanges.delete(node);
+      replaceNodeRanges(node);
+      updateNodeOccurrences(node, new Map());
       return;
     }
 
     const text = node.textContent ?? "";
     if (!text.trim()) {
-      nodeRanges.delete(node);
+      replaceNodeRanges(node);
+      updateNodeOccurrences(node, new Map());
       return;
     }
 
-    const ranges = createEmptyRanges();
+    const candidates: Candidate[] = [];
     const occupied: Array<{ start: number; end: number }> = [];
 
     for (const phrase of findLearningPhraseMatches(text)) {
@@ -181,16 +262,13 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
       if (!options.shouldTranslateToken(phrase.surface, lemma, null, settings, context)) {
         continue;
       }
-
-      const key = resolveMasteryKey(phrase.surface);
-      const occurrences = incrementArticleCount(key, node);
-      // Curated high-priority phrases can appear once; lower-priority phrases
-      // become automatic targets after repetition to avoid visual noise.
-      if (phrase.priority < 3 && occurrences < 2) {
-        continue;
-      }
-      const intensity = getHighlightIntensity(settings, phrase.surface, occurrences);
-      addRange(ranges, intensity, node, phrase.start, phrase.end);
+      candidates.push({
+        surface: phrase.surface,
+        key: resolveMasteryKey(phrase.surface),
+        start: phrase.start,
+        end: phrase.end,
+        phrasePriority: phrase.priority,
+      });
       occupied.push({ start: phrase.start, end: phrase.end });
     }
 
@@ -216,26 +294,75 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
         continue;
       }
 
-      const key = resolveMasteryKey(surface);
-      const occurrences = incrementArticleCount(key, node);
-      const intensity = getHighlightIntensity(settings, surface, occurrences);
-      addRange(ranges, intensity, node, start, end);
+      candidates.push({
+        surface,
+        key: resolveMasteryKey(surface),
+        start,
+        end,
+      });
+    }
 
-      if (totalRanges() + ranges.strong.length + ranges.normal.length + ranges.weak.length >= MAX_TOTAL_RANGES) {
+    const occurrenceCounts = new Map<string, number>();
+    for (const candidate of candidates) {
+      occurrenceCounts.set(candidate.key, (occurrenceCounts.get(candidate.key) ?? 0) + 1);
+    }
+    updateNodeOccurrences(node, occurrenceCounts);
+
+    const ranges = createEmptyRanges();
+    const oldNodeRanges = rangeSize(nodeRanges.get(node));
+    let available = Math.max(0, MAX_TOTAL_RANGES - (totalRangeCount - oldNodeRanges));
+
+    for (const candidate of candidates) {
+      const articleOccurrences = articleCounts.get(candidate.key) ?? 1;
+      if (candidate.phrasePriority && candidate.phrasePriority < 3 && articleOccurrences < 2) {
+        continue;
+      }
+      const intensity = getHighlightIntensity(settings, candidate.surface, articleOccurrences);
+      const added = addRange(
+        ranges,
+        intensity,
+        node,
+        candidate.start,
+        candidate.end,
+        available,
+      );
+      available -= added;
+      if (available <= 0) {
         break;
       }
     }
 
-    if (ranges.strong.length || ranges.normal.length || ranges.weak.length) {
-      nodeRanges.set(node, ranges);
-    } else {
-      nodeRanges.delete(node);
-    }
+    replaceNodeRanges(node, ranges);
   }
 
-  function enqueueTextNodes(root: Node) {
+  function registerTextNode(node: Text) {
+    if (!node.isConnected || options.shouldSkipTextNode(node)) {
+      return;
+    }
+
+    if (!viewportObserver) {
+      queuedNodes.add(node);
+      return;
+    }
+
+    const element = node.parentElement;
+    if (!element) {
+      queuedNodes.add(node);
+      return;
+    }
+
+    let nodes = viewportNodes.get(element);
+    if (!nodes) {
+      nodes = new Set<Text>();
+      viewportNodes.set(element, nodes);
+      viewportObserver.observe(element);
+    }
+    nodes.add(node);
+  }
+
+  function registerTextNodes(root: Node) {
     if (root.nodeType === Node.TEXT_NODE) {
-      queuedNodes.add(root as Text);
+      registerTextNode(root as Text);
       return;
     }
     if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
@@ -245,7 +372,7 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let current = walker.nextNode();
     while (current) {
-      queuedNodes.add(current as Text);
+      registerTextNode(current as Text);
       current = walker.nextNode();
     }
   }
@@ -269,23 +396,26 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
 
       while (
         processedNodes < MAX_NODES_PER_CHUNK &&
-        performance.now() - started < MAX_CHUNK_MS &&
-        totalRanges() < MAX_TOTAL_RANGES
+        performance.now() - started < MAX_CHUNK_MS
       ) {
-        let node = queuedNodes.values().next().value as Text | undefined;
-        if (node) {
-          queuedNodes.delete(node);
-        } else if (fullScanWalker) {
-          node = fullScanWalker.nextNode() as Text | null ?? undefined;
-          if (!node) {
-            fullScanWalker = null;
-            break;
-          }
-        } else {
+        const queued = queuedNodes.values().next().value as Text | undefined;
+        if (queued) {
+          queuedNodes.delete(queued);
+          await processNode(queued, settings);
+          processedNodes += 1;
+          continue;
+        }
+
+        if (!fullScanWalker) {
           break;
         }
 
-        await processNode(node, settings);
+        const discovered = fullScanWalker.nextNode() as Text | null;
+        if (!discovered) {
+          fullScanWalker = null;
+          break;
+        }
+        registerTextNode(discovered);
         processedNodes += 1;
       }
 
@@ -315,19 +445,42 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
     scheduleProcessing();
   }
 
+  function removeNodeTree(root: Node) {
+    if (root.nodeType === Node.TEXT_NODE) {
+      const node = root as Text;
+      replaceNodeRanges(node);
+      updateNodeOccurrences(node, new Map());
+      queuedNodes.delete(node);
+      return;
+    }
+    if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+      return;
+    }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let current = walker.nextNode();
+    while (current) {
+      const node = current as Text;
+      replaceNodeRanges(node);
+      updateNodeOccurrences(node, new Map());
+      queuedNodes.delete(node);
+      current = walker.nextNode();
+    }
+  }
+
   function handleMutations(records: MutationRecord[]) {
     for (const record of records) {
       if (record.type === "characterData") {
-        enqueueTextNodes(record.target);
+        const node = record.target as Text;
+        // Already-visible changed text should update immediately; it has already
+        // passed the viewport gate once.
+        queuedNodes.add(node);
         continue;
       }
       for (const removed of record.removedNodes) {
-        if (removed.nodeType === Node.TEXT_NODE) {
-          nodeRanges.delete(removed as Text);
-        }
+        removeNodeTree(removed);
       }
       for (const added of record.addedNodes) {
-        enqueueTextNodes(added);
+        registerTextNodes(added);
       }
     }
     scheduleProcessing();
