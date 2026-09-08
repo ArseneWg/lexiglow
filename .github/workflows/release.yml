@@ -1,0 +1,62 @@
+name: Release Artifact
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Prepare lexicon
+        run: npm run prepare:lexicon
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Package release artifact
+        run: npm run release:package
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser E2E
+        run: npm run test:e2e
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lexiglow-${{ github.ref_name }}
+          path: |
+            release/*.zip
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
