@@ -6,6 +6,7 @@ import {
   isEnglishSelectionText,
   isSingleEnglishWord,
   normalizeSingleEnglishWord,
+  validateEnglishSelectionText,
 } from "../src/shared/word";
 
 describe("extractWordAtOffset", () => {
@@ -69,54 +70,47 @@ describe("extractWordAtOffset", () => {
     });
   });
 
-  test("extracts each side of a hyphenated compound as its own word", () => {
+  test("treats hyphenated compounds as one lexical unit", () => {
     expect(extractWordAtOffset("Use mixed-precision training.", 8)).toEqual({
-      surface: "mixed",
+      surface: "mixed-precision",
       start: 4,
-      end: 9,
-    });
-    expect(extractWordAtOffset("Use mixed-precision training.", 14)).toEqual({
-      surface: "precision",
-      start: 10,
       end: 19,
     });
-  });
-
-  test("extracts each side of another hyphenated compound independently", () => {
-    expect(extractWordAtOffset("The result is high-impact work.", 16)).toEqual({
-      surface: "high",
-      start: 14,
-      end: 18,
+    expect(extractWordAtOffset("Use mixed-precision training.", 14)).toEqual({
+      surface: "mixed-precision",
+      start: 4,
+      end: 19,
     });
     expect(extractWordAtOffset("The result is high-impact work.", 21)).toEqual({
-      surface: "impact",
-      start: 19,
+      surface: "high-impact",
+      start: 14,
       end: 25,
     });
   });
 });
 
 describe("selection helpers", () => {
-  test("detects a single english word", () => {
+  test("detects lexical words and compounds", () => {
     expect(isSingleEnglishWord("received")).toBe(true);
     expect(isSingleEnglishWord("received.")).toBe(true);
     expect(isSingleEnglishWord("don’t")).toBe(true);
-    expect(isSingleEnglishWord("mixed-precision")).toBe(false);
+    expect(isSingleEnglishWord("mixed-precision")).toBe(true);
     expect(isSingleEnglishWord("look up")).toBe(false);
   });
 
-  test("normalizes single selected words by trimming edge punctuation", () => {
+  test("normalizes selected lexical units by trimming edge punctuation", () => {
     expect(normalizeSingleEnglishWord("\"received.\"")).toBe("received");
     expect(normalizeSingleEnglishWord("(continue)")).toBe("continue");
     expect(normalizeSingleEnglishWord("worked,")).toBe("worked");
     expect(normalizeSingleEnglishWord("don’t")).toBe("don't");
-    expect(normalizeSingleEnglishWord("high-impact")).toBe("");
+    expect(normalizeSingleEnglishWord("high-impact")).toBe("high-impact");
   });
 
   test("accepts english words, phrases, and sentences", () => {
     expect(isEnglishSelectionText("received")).toBe(true);
     expect(isEnglishSelectionText("don’t stop reading")).toBe(true);
     expect(isEnglishSelectionText("look up")).toBe(true);
+    expect(isEnglishSelectionText("mixed-precision")).toBe(true);
     expect(isEnglishSelectionText("He received the package yesterday.")).toBe(true);
     expect(isEnglishSelectionText("Revenue grew by 12.5% in Q4/FY2025.")).toBe(true);
     expect(isEnglishSelectionText("Ping @alice and confirm the deploy still works.")).toBe(true);
@@ -144,9 +138,15 @@ describe("selection helpers", () => {
     expect(isEnglishSelectionText("https://example.com/docs")).toBe(false);
   });
 
-  test("counts english words in normalized selections", () => {
+  test("returns a distinct validation reason for overlong selections", () => {
+    expect(validateEnglishSelectionText("English ".repeat(200))).toBe("tooLong");
+    expect(validateEnglishSelectionText("这是中文")).toBe("containsCjk");
+    expect(validateEnglishSelectionText("@somebody")).toBe("technical");
+  });
+
+  test("counts hyphenated lexical compounds as one unit", () => {
     expect(countEnglishWords("in   charge   of")).toBe(3);
-    expect(countEnglishWords("mixed-precision")).toBe(2);
+    expect(countEnglishWords("mixed-precision")).toBe(1);
     expect(countEnglishWords("don’t stop")).toBe(2);
   });
 });
