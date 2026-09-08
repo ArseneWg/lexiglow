@@ -1,0 +1,42 @@
+name: Patch contraction morphology
+
+on:
+  push:
+    branches: [fix/review-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/review-hardening
+      - name: Patch contraction handling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('src/shared/normalize.ts')
+          text = path.read_text()
+          pattern = re.compile(r'function normalizePossessiveToken\(cleaned: string\): string \{.*?\n\}', re.S)
+          replacement = '''const S_CONTRACTIONS = new Set([\n  "it's", "he's", "she's", "that's", "what's", "who's", "there's", "here's",\n  "where's", "when's", "why's", "how's", "let's",\n]);\n\nfunction normalizePossessiveToken(cleaned: string): string {\n  let token = cleaned;\n  if (token.endsWith("'s") && !S_CONTRACTIONS.has(token)) {\n    token = token.slice(0, -2);\n  } else if (token.endsWith("s'")) {\n    token = token.slice(0, -1);\n  }\n  return token;\n}'''
+          next_text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+            raise SystemExit(f'expected one possessive helper, patched {count}')
+          path.write_text(next_text)
+          PY
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/patch-contractions.yml
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Distinguish contractions from possessives"
+          git push origin HEAD:fix/review-hardening
