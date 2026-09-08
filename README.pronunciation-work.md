@@ -1,3 +1,3 @@
 # Pronunciation accuracy refactor
 
-Work branch for the pronunciation review requested after Learning Engine v2. The implementation and pinned pronunciation data have been generated. Type compatibility, heteronym disambiguation, and public-site selection smoke fixes are staged; this temporary marker will be removed before merge.
+Work branch for the pronunciation review requested after Learning Engine v2. The latest implementation includes atomic variants, context-aware heteronyms, exact-surface TTS fallback, human-audio priority, safe inflection derivation, generic-accent safeguards, and delayed-playback protection. This temporary marker will be removed before merge.
