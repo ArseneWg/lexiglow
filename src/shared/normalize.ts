@@ -139,9 +139,14 @@ function uniqueCandidates(candidates: string[]): string[] {
   return [...new Set(candidates.filter(Boolean))];
 }
 
+const S_CONTRACTIONS = new Set([
+  "it's", "he's", "she's", "that's", "what's", "who's", "there's", "here's",
+  "where's", "when's", "why's", "how's", "let's",
+]);
+
 function normalizePossessiveToken(cleaned: string): string {
   let token = cleaned;
-  if (token.endsWith("'s")) {
+  if (token.endsWith("'s") && !S_CONTRACTIONS.has(token)) {
     token = token.slice(0, -2);
   } else if (token.endsWith("s'")) {
     token = token.slice(0, -1);
