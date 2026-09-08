@@ -158,6 +158,59 @@ describe("settings storage", () => {
     expect(syncArea.set).not.toHaveBeenCalled();
   });
 
+  test("keeps API keys out of chrome.storage.local while preserving trusted access", async () => {
+    await saveTranslatorSettings({
+      ...DEFAULT_TRANSLATOR_SETTINGS,
+      defaultTranslationProvider: "llm",
+      apiKey: "sk-private-test",
+    });
+
+    const storedState = localStore[STORAGE_TRANSLATOR_SETTINGS_KEY] as {
+      profiles: Array<{ apiKey: string }>;
+    };
+    expect(storedState.profiles[0]?.apiKey).toBe("");
+
+    const settings = await getTranslatorSettings();
+    expect(settings.apiKey).toBe("sk-private-test");
+  });
+
+  test("redacts legacy API keys in untrusted page contexts", async () => {
+    localStore[STORAGE_TRANSLATOR_SETTINGS_KEY] = {
+      activeProfileId: DEFAULT_TRANSLATOR_PROFILE.id,
+      profiles: [
+        {
+          ...DEFAULT_TRANSLATOR_PROFILE,
+          apiKey: "legacy-secret",
+        },
+      ],
+    };
+    vi.stubGlobal("location", { protocol: "https:" });
+
+    const settings = await getTranslatorSettings();
+
+    expect(settings.apiKey).toBe("");
+  });
+
+  test("migrates legacy local API keys into the trusted secret store", async () => {
+    localStore[STORAGE_TRANSLATOR_SETTINGS_KEY] = {
+      activeProfileId: DEFAULT_TRANSLATOR_PROFILE.id,
+      profiles: [
+        {
+          ...DEFAULT_TRANSLATOR_PROFILE,
+          apiKey: "legacy-secret",
+        },
+      ],
+    };
+
+    const settings = await getTranslatorSettings();
+    const storedState = localStore[STORAGE_TRANSLATOR_SETTINGS_KEY] as {
+      profiles: Array<{ apiKey: string }>;
+    };
+
+    expect(settings.apiKey).toBe("legacy-secret");
+    expect(storedState.profiles[0]?.apiKey).toBe("");
+  });
+
   test("reads the active translator profile from settings state", async () => {
     localStore[STORAGE_TRANSLATOR_SETTINGS_KEY] = {
       activeProfileId: "local-qwen",
