@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, launchExtensionContext, test } from "./fixtures";
 import {
   clearExtensionStorage,
   getHighlightTexts,
@@ -154,10 +154,12 @@ test("pronunciation controls render accent data and dispatch the requested US sp
   }).toEqual(expect.objectContaining({ text: "obfuscation", accent: "en-US" }));
 });
 
-test("extension runtime reload preserves learning state and restores content behavior", async ({
+test("restarting the same Chromium profile preserves learning state and restores content behavior", async ({
   context,
   page,
   extensionWorker,
+  extensionPath,
+  userDataDir,
 }) => {
   await seedUserSettings(extensionWorker, {
     knownBaseRank: 0,
@@ -171,30 +173,34 @@ test("extension runtime reload preserves learning state and restores content beh
       },
     },
   });
-  await serveTestPage(context, page, '<p id="text">obfuscation should stay mastered after reload.</p>');
+  await serveTestPage(context, page, '<p id="text">obfuscation should stay mastered after restart.</p>');
   await page.waitForTimeout(250);
   expect(await getHighlightTexts(page)).not.toContain("obfuscation");
 
-  await extensionWorker.evaluate(() => chrome.runtime.reload());
-  await page.waitForTimeout(250);
-  await page.reload({ waitUntil: "domcontentloaded" });
+  await context.close();
 
-  await expect.poll(async () => {
-    const worker = context.serviceWorkers().at(-1);
-    if (!worker) return false;
-    try {
-      return await worker.evaluate(() => Boolean(chrome.runtime?.id));
-    } catch {
-      return false;
+  const restartedContext = await launchExtensionContext(userDataDir, extensionPath);
+  try {
+    await mockDictionaryFailures(restartedContext);
+    let [restartedWorker] = restartedContext.serviceWorkers();
+    if (!restartedWorker) {
+      restartedWorker = await restartedContext.waitForEvent("serviceworker");
     }
-  }, { timeout: 10_000 }).toBe(true);
 
-  const reloadedWorker = context.serviceWorkers().at(-1);
-  expect(reloadedWorker).toBeDefined();
-  const settings = await readUserSettings(reloadedWorker!);
-  expect(settings?.masteredOverrides).toEqual(expect.arrayContaining(["obfuscation"]));
-  await page.waitForTimeout(300);
-  expect(await getHighlightTexts(page)).not.toContain("obfuscation");
+    const settings = await readUserSettings(restartedWorker);
+    expect(settings?.masteredOverrides).toEqual(expect.arrayContaining(["obfuscation"]));
+
+    const restartedPage = restartedContext.pages()[0] ?? await restartedContext.newPage();
+    await serveTestPage(
+      restartedContext,
+      restartedPage,
+      '<p id="text">obfuscation should stay mastered after restart.</p>',
+    );
+    await restartedPage.waitForTimeout(300);
+    expect(await getHighlightTexts(restartedPage)).not.toContain("obfuscation");
+  } finally {
+    await restartedContext.close();
+  }
 });
 
 test("context extraction reconstructs a sentence split across inline DOM nodes", async ({
