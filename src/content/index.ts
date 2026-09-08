@@ -3980,7 +3980,7 @@ function showOverlongSelectionHint(): boolean {
   activeSelectionTooltipContext = null;
   activeSelectionContext = null;
   tooltip.translationEl.dataset.visible = "false";
-  tooltip.metaEl.style.display = "none";
+  tooltip.metaEl.style.display = "flex";
   tooltip.llmButton.style.display = "none";
   tooltip.selectionAnalysisButton.style.display = "none";
   tooltip.hintEl.dataset.visible = "true";
