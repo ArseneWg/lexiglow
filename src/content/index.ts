@@ -24,8 +24,10 @@ import {
   extractWordAtOffset,
   isEnglishSelectionText,
   isSingleEnglishWord,
+  MAX_SELECTION_TEXT_LENGTH,
   normalizeSelectionText,
   normalizeSingleEnglishWord,
+  validateEnglishSelectionText,
 } from "../shared/word";
 import type {
   LexiconLookupResult,
@@ -38,8 +40,6 @@ import type {
 
 const HOVER_DELAY_MS = 320;
 const HIDE_DELAY_MS = 1200;
-const HIGHLIGHT_NAME = "wordwise-pending";
-const HIGHLIGHT_SCAN_LIMIT = 1200;
 const SELECTION_TRIGGER_DEBOUNCE_MS = 40;
 let currentLearnerLanguageCode: SupportedLearnerLanguageCode = "zh-CN";
 let currentDefaultTranslationProvider: TranslationProviderChoice = "google";
@@ -3956,12 +3956,48 @@ function getHoverContext(clientX: number, clientY: number): HoverContext | null 
   };
 }
 
+function showOverlongSelectionHint(): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+
+  const text = normalizeSelectionText(selection.toString());
+  if (validateEnglishSelectionText(text) !== "tooLong") return false;
+
+  const range = selection.getRangeAt(0).cloneRange();
+  if (shouldIgnoreSelectionRange(range)) return false;
+  const rect = range.getBoundingClientRect();
+  if ((!rect.width && !rect.height) || !isFinite(rect.left) || !isFinite(rect.top)) return false;
+
+  selectionRequestId += 1;
+  hideSentenceAnalysis();
+  renderSelectionTooltip({
+    text: "",
+    rect,
+    requestId: selectionRequestId,
+    contextText: "",
+    selectedFontSizePx: resolveSelectionFontSizePx(range),
+  });
+  activeSelectionTooltipContext = null;
+  activeSelectionContext = null;
+  tooltip.translationEl.dataset.visible = "false";
+  tooltip.metaEl.style.display = "none";
+  tooltip.llmButton.style.display = "none";
+  tooltip.selectionAnalysisButton.style.display = "none";
+  tooltip.hintEl.dataset.visible = "true";
+  tooltip.hintEl.dataset.loading = "false";
+  tooltip.hintEl.dataset.kind = "status";
+  tooltip.hintEl.textContent = ui("tooltipSelectionTooLong", { limit: MAX_SELECTION_TEXT_LENGTH });
+  positionTooltip(rect);
+  return true;
+}
+
 async function updateSelectionAnalysisTrigger() {
   if (Date.now() < suppressSelectionTriggerUntil) {
     return;
   }
 
   const settings = await ensureSettings();
+  if (showOverlongSelectionHint()) return;
   const selectedWordContext = settings.wordReviewTrigger === "selection" ? getSelectedWordContext() : null;
 
   if (selectedWordContext) {

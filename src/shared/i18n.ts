@@ -1,7 +1,7 @@
 import type { SupportedLearnerLanguageCode } from "./types";
 
 const UI_STRINGS_EN = {
-  optionsTitle: "WordWise Settings",
+  optionsTitle: "LexiGlow Settings",
   optionsHeroDescription: "Adjust your default known-word range, manage manual overrides, and choose the learner language used for translations and the UI.",
   optionsDefaultKnownTopN: "Default Known Top N Words",
   optionsCurrentThreshold: "Current threshold",
@@ -74,8 +74,8 @@ const UI_STRINGS_EN = {
   popupRefreshHint: "After you change it, the highlight overlay will refresh automatically.",
   popupOpenFullSettings: "Open full settings",
   popupRefreshCurrentPage: "Refresh current page",
-  highlightSubject: "Subject",
-  highlightPredicate: "Predicate",
+  highlightSubject: "Subject head",
+  highlightPredicate: "Main verb",
   highlightNonfinite: "Non-finite",
   highlightConjunction: "Conjunction",
   highlightRelative: "Relative",
@@ -116,7 +116,8 @@ const UI_STRINGS_EN = {
   tooltipTranslationUnavailable: "Translation unavailable.",
   tooltipPronunciationUnavailable: "Pronunciation unavailable.",
   tooltipSentenceAnalysisUnavailable: "Sentence analysis is temporarily unavailable.",
-  tooltipShortSelectionHint: "This selection is too short. Direct translation is better.",
+  tooltipShortSelectionHint: "Select at least three English words for sentence analysis.",
+  tooltipSelectionTooLong: "This selection is too long. Select up to {limit} characters.",
   errorNoTextToPronounce: "There is no text to pronounce.",
   errorNoUsVoice: "No matching US English voice is available on this device.",
   errorNoUkVoice: "No matching UK English voice is available on this device.",
@@ -131,7 +132,7 @@ type UiDictionary = Partial<Record<UiStringKey, string>>;
 
 const UI_STRINGS: Record<SupportedLearnerLanguageCode, UiDictionary> = {
   "zh-CN": {
-    optionsTitle: "WordWise 设置",
+    optionsTitle: "LexiGlow 设置",
     optionsHeroDescription: "调整默认已掌握词范围，管理手动标记的单词，并选择翻译和界面使用的学习语言。",
     optionsDefaultKnownTopN: "默认已掌握前 N 词",
     optionsCurrentThreshold: "当前阈值",
@@ -204,8 +205,8 @@ const UI_STRINGS: Record<SupportedLearnerLanguageCode, UiDictionary> = {
     popupRefreshHint: "调整后，页面高亮会自动刷新。",
     popupOpenFullSettings: "打开完整设置",
     popupRefreshCurrentPage: "刷新当前页面",
-    highlightSubject: "主语",
-    highlightPredicate: "谓语",
+    highlightSubject: "主语中心词",
+    highlightPredicate: "主句谓语",
     highlightNonfinite: "非谓语",
     highlightConjunction: "连词",
     highlightRelative: "关系词",
@@ -246,7 +247,8 @@ const UI_STRINGS: Record<SupportedLearnerLanguageCode, UiDictionary> = {
     tooltipTranslationUnavailable: "翻译暂不可用。",
     tooltipPronunciationUnavailable: "发音暂不可用。",
     tooltipSentenceAnalysisUnavailable: "长难句分析暂时不可用。",
-    tooltipShortSelectionHint: "这段内容太短，更适合直接看翻译。",
+    tooltipShortSelectionHint: "长难句分析至少选择 3 个英文词。",
+    tooltipSelectionTooLong: "划选内容过长，请控制在 {limit} 个字符以内。",
     errorNoTextToPronounce: "没有可发音的内容。",
     errorNoUsVoice: "当前设备没有可用的美式英语语音。",
     errorNoUkVoice: "当前设备没有可用的英式英语语音。",
