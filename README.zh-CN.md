@@ -109,7 +109,7 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 - MutationObserver 动态插入处理
 - SPA subtree 替换后清理旧高亮并发现新路由内容
 
-翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。
+当前验证基线为 **12 个 Vitest 文件 / 136 条单元测试 + 18 / 18 条 Playwright Chromium 扩展 E2E**。翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。E2E 失败时会保留 trace、截图、HTML 报告和测试结果 diagnostics。
 
 ## 隐私与第三方服务
 
