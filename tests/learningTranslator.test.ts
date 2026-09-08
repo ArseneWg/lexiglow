@@ -101,4 +101,37 @@ describe("learning translation behavior", () => {
     expect(retryBody.messages[1]?.content).toContain("quality_retry:");
     expect(retryBody.messages[1]?.content).toContain("1:model");
   });
+
+  test("uses the same compound token boundaries as the in-page renderer", async () => {
+    const sentence = "The system uses mixed-precision training efficiently.";
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      const userPrompt = body.messages.find((message) => message.role === "user")?.content ?? "";
+
+      expect(userPrompt).toContain("0:The 1:system 2:uses 3:mixed-precision 4:training 5:efficiently");
+      expect(userPrompt).not.toContain("3:mixed 4:precision");
+
+      return openAiResponse({
+        translation: "该系统高效地使用混合精度训练。",
+        structure: "system uses training",
+        analysisSteps: ["切分。", "主干是 system uses training。", "mixed-precision 修饰 training。", "按主干再修饰的顺序翻译。"],
+        highlights: [
+          { category: "subject", text: "system", tokenIndex: 1 },
+          { category: "predicate", text: "uses", tokenIndex: 2 },
+        ],
+        clauseBlocks: [`main|||${sentence}`],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeSentenceWithLlm({ text: sentence, settings: localSettings });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: "system", tokenIndex: 1 }),
+      expect.objectContaining({ text: "uses", tokenIndex: 2 }),
+    ]));
+  });
 });
