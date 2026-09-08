@@ -22,11 +22,28 @@ describe("normalize helpers", () => {
     expect(toLemma("knives")).toBe("knif");
   });
 
-  test("normalizes common irregular inflections", () => {
+  test("normalizes common irregular inflections and plurals", () => {
     expect(toLemma("went")).toBe("go");
     expect(toLemma("written")).toBe("write");
     expect(toLemma("bought")).toBe("buy");
     expect(toLemma("taken")).toBe("take");
+    expect(toLemma("children")).toBe("child");
+    expect(toLemma("teeth")).toBe("tooth");
+  });
+
+  test("provides comparative and superlative candidates", () => {
+    expect(getLemmaCandidates("bigger")).toEqual(expect.arrayContaining(["bigger", "big"]));
+    expect(getLemmaCandidates("easiest")).toEqual(expect.arrayContaining(["easiest", "easy"]));
+    expect(toLemma("better")).toBe("good");
+    expect(toLemma("worst")).toBe("bad");
+  });
+
+  test("distinguishes contractions from possessives", () => {
+    expect(getLemmaCandidates("it's")[0]).toBe("it's");
+    expect(getLemmaCandidates("he's")[0]).toBe("he's");
+    expect(getLemmaCandidates("that's")[0]).toBe("that's");
+    expect(getLemmaCandidates("Alice's")[0]).toBe("alice");
+    expect(getLemmaCandidates("students'")[0]).toBe("students");
   });
 
   test("provides lexicon-friendly candidates for past tense words", () => {
