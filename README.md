@@ -65,9 +65,18 @@ The internal A1-C1 labels are vocabulary-size heuristics used to tune explanatio
 
 In addition to unit tests, the project uses Playwright to launch a real persistent Chromium profile with the MV3 extension loaded. The browser suite exercises the service worker, content script, Shadow DOM tooltip, CSS Highlight API, selections, Popup / Options, dynamic DOM updates, and persisted learning state.
 
-The current suite contains 18 user-facing Chromium scenarios, covering known/relearning/ignore flows, inflected phrases, hyphenated compounds, Google ↔ contextual LLM switching, long and overlong selections, sentence-analysis retry and repeated-token positioning, pronunciation controls, Options-driven settings, same-profile browser restart persistence, large-page scrolling, and SPA subtree replacement.
+The current suite contains 24 user-facing Chromium scenarios. In addition to the original reading-flow coverage, it now verifies Options backup/download/import, API-key redaction and same-profile secret preservation, LLM 429 and malformed-response fallback, explicit 401 failure UI without fallback, stale hover-response suppression, and prevention of late responses resurrecting a closed tooltip.
 
-The verified CI baseline is 12 Vitest files / 136 unit tests plus 18 / 18 Playwright Chromium extension E2E tests. Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness. Failed E2E runs retain Playwright traces, screenshots, HTML reports, and test-result diagnostics for investigation.
+The verified CI baseline is 16 Vitest files / 148 unit tests plus 24 / 24 Playwright Chromium extension E2E tests. Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness. Failed E2E runs retain Playwright traces, screenshots, HTML reports, and test-result diagnostics for investigation. A separate non-blocking public-site smoke workflow continues to exercise GitHub, Hacker News, MDN, web.dev, React docs, and Reddit when its CI egress is accepted.
+
+## Long-term data safety and release artifacts
+
+- User learning settings now carry an explicit schema version. Older local records are sanitized and migrated to schema v2 once; records from a newer schema are never overwritten merely by reading them from an older build.
+- Options includes Backup and restore. The export contains long-term learning state and non-secret translator profile settings. API keys are always redacted from the JSON backup.
+- Import validates the LexiGlow backup format/version and size, sanitizes legacy-shaped settings, and preserves an existing local API key only when the imported profile has the same profile ID.
+- `npm run release:package` emits `release/lexiglow-<version>.zip` plus `SHA256SUMS`. The package contains only `manifest.json` and production `dist/**` files, and fails if `package.json` and the manifest disagree on version or if a manifest-referenced runtime file is missing.
+- PR CI packages the same source twice and requires identical SHA256 output. Tag releases additionally require `vX.Y.Z` to match `package.json`, then run the full unit/build/browser gate before uploading the ZIP artifact.
+- Tooltip lifecycle state is represented explicitly as hidden, hover-word, review-word, selection, analysis-prompt, or analysis instead of independent booleans/string flags that could drift apart during async interactions.
 
 ## Privacy and third-party services
 
