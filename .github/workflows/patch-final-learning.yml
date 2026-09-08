@@ -1,0 +1,87 @@
+name: Patch final learning engine details
+
+on:
+  push:
+    branches: [fix/review-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/review-hardening
+
+      - name: Align sentence tokenization and article thresholds
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          translator_path = Path('src/shared/translator.ts')
+          translator = translator_path.read_text()
+          import_anchor = 'import { countTotalKnown, estimateLearnerLevel, resolveWordFlags } from "./settings";\n'
+          if 'import { createEnglishTokenMatcher } from "./word";' not in translator:
+            if import_anchor not in translator:
+              raise SystemExit('missing translator import anchor')
+            translator = translator.replace(
+              import_anchor,
+              import_anchor + 'import { createEnglishTokenMatcher } from "./word";\n',
+              1,
+            )
+          old = '''function tokenizeSentenceForAnalysis(sentence: string): AnalysisToken[] {
+            const tokens: AnalysisToken[] = [];
+            const matcher = /[A-Za-z]+(?:['’][A-Za-z]+)?/g;
+            let match = matcher.exec(sentence);
+            let index = 0;
+            while (match) {
+              tokens.push({ index, text: match[0], start: match.index, end: match.index + match[0].length });
+              index += 1;
+              match = matcher.exec(sentence);
+            }
+            return tokens;
+          }'''.replace('          ', '')
+          new = '''function tokenizeSentenceForAnalysis(sentence: string): AnalysisToken[] {
+            const tokens: AnalysisToken[] = [];
+            const matcher = createEnglishTokenMatcher();
+            let match = matcher.exec(sentence);
+            let index = 0;
+            while (match) {
+              tokens.push({ index, text: match[0], start: match.index, end: match.index + match[0].length });
+              index += 1;
+              match = matcher.exec(sentence);
+            }
+            return tokens;
+          }'''.replace('          ', '')
+          if old not in translator:
+            raise SystemExit('missing analysis tokenizer block')
+          translator = translator.replace(old, new, 1)
+          translator_path.write_text(translator)
+
+          highlighter_path = Path('src/content/highlightEngine.ts')
+          highlighter = highlighter_path.read_text()
+          old_threshold = 'if (beforeArticle < 3 && afterArticle >= 3) {'
+          new_threshold = '''if (
+                (beforeArticle < 3 && afterArticle >= 3) ||
+                (beforeArticle >= 3 && afterArticle < 3)
+              ) {'''
+          if old_threshold not in highlighter:
+            raise SystemExit('missing article threshold block')
+          highlighter = highlighter.replace(old_threshold, new_threshold, 1)
+          highlighter_path.write_text(highlighter)
+          PY
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/patch-final-learning.yml
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Align analysis tokenizer and article priorities"
+          git push origin HEAD:fix/review-hardening
