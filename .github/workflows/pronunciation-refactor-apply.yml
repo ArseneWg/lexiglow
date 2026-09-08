@@ -24,6 +24,18 @@ jobs:
         with:
           node-version: 22
 
+      - name: Repair applicator template escaping
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/apply-pronunciation-refactor.mjs')
+          text = path.read_text()
+          text = text.replace('const pattern = new RegExp("\\\\b" + target.replace(/[.*+?^${}()|[\\\\]\\\\\\\\]/g, "\\\\\\\\$&") + "\\\\b", "i");', 'const pattern = new RegExp("\\\\b" + target + "\\\\b", "i");')
+          path.write_text(text)
+          PY
+          node --check scripts/apply-pronunciation-refactor.mjs
+
       - name: Apply pronunciation refactor
         run: node scripts/apply-pronunciation-refactor.mjs
 
