@@ -7,6 +7,10 @@ describe("normalize helpers", () => {
     expect(cleanSurfaceToken("...Running!")).toBe("Running");
   });
 
+  test("normalizes typographic apostrophes", () => {
+    expect(cleanSurfaceToken("don’t")).toBe("don't");
+  });
+
   test("rejects digit-containing words", () => {
     expect(cleanSurfaceToken("gpt4")).toBe("");
   });
@@ -18,10 +22,22 @@ describe("normalize helpers", () => {
     expect(toLemma("knives")).toBe("knif");
   });
 
+  test("normalizes common irregular inflections", () => {
+    expect(toLemma("went")).toBe("go");
+    expect(toLemma("written")).toBe("write");
+    expect(toLemma("bought")).toBe("buy");
+    expect(toLemma("taken")).toBe("take");
+  });
+
   test("provides lexicon-friendly candidates for past tense words", () => {
     expect(getLemmaCandidates("received")).toEqual(
       expect.arrayContaining(["received", "receiv", "receive"]),
     );
+  });
+
+  test("provides base lemmas for irregular forms", () => {
+    expect(getLemmaCandidates("went")).toEqual(expect.arrayContaining(["went", "go"]));
+    expect(getLemmaCandidates("spoken")).toEqual(expect.arrayContaining(["spoken", "speak"]));
   });
 
   test("keeps doubled-consonant stems available for mastery resolution", () => {
