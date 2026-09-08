@@ -49,9 +49,55 @@ export const LEARNING_PHRASES: readonly LearningPhrase[] = [
   { text: "even though", priority: 2 },
 ] as const;
 
-const SORTED_PHRASES = [...LEARNING_PHRASES].sort(
-  (left, right) => right.text.length - left.text.length,
-);
+const PHRASE_HEAD_VARIANTS: Readonly<Record<string, readonly string[]>> = {
+  account: ["account", "accounts", "accounted", "accounting"],
+  be: ["be", "am", "is", "are", "was", "were", "been", "being"],
+  carry: ["carry", "carries", "carried", "carrying"],
+  come: ["come", "comes", "came", "coming"],
+  figure: ["figure", "figures", "figured", "figuring"],
+  give: ["give", "gives", "gave", "given", "giving"],
+  lead: ["lead", "leads", "led", "leading"],
+  make: ["make", "makes", "made", "making"],
+  point: ["point", "points", "pointed", "pointing"],
+  result: ["result", "results", "resulted", "resulting"],
+  rule: ["rule", "rules", "ruled", "ruling"],
+  set: ["set", "sets", "setting"],
+  take: ["take", "takes", "took", "taken", "taking"],
+  depend: ["depend", "depends", "depended", "depending"],
+  refer: ["refer", "refers", "referred", "referring"],
+  consist: ["consist", "consists", "consisted", "consisting"],
+  contribute: ["contribute", "contributes", "contributed", "contributing"],
+  deal: ["deal", "deals", "dealt", "dealing"],
+  focus: ["focus", "focuses", "focused", "focusing"],
+  apply: ["apply", "applies", "applied", "applying"],
+};
+
+interface MatchablePhrase extends LearningPhrase {
+  matchText: string;
+}
+
+function expandPhrase(phrase: LearningPhrase): MatchablePhrase[] {
+  const [head, ...tail] = phrase.text.split(" ");
+  const variants = PHRASE_HEAD_VARIANTS[head];
+  if (!variants) {
+    return [{ ...phrase, matchText: phrase.text }];
+  }
+
+  const suffix = tail.length ? ` ${tail.join(" ")}` : "";
+  return variants.map((variant) => ({
+    ...phrase,
+    matchText: `${variant}${suffix}`,
+  }));
+}
+
+const MATCHABLE_PHRASES = LEARNING_PHRASES
+  .flatMap(expandPhrase)
+  .sort((left, right) => right.matchText.length - left.matchText.length);
+
+const CANONICAL_BY_VARIANT = new Map<string, string>();
+for (const phrase of MATCHABLE_PHRASES) {
+  CANONICAL_BY_VARIANT.set(phrase.matchText, phrase.text);
+}
 
 export interface PhraseMatch extends LearningPhrase {
   surface: string;
@@ -59,12 +105,17 @@ export interface PhraseMatch extends LearningPhrase {
   end: number;
 }
 
-export function normalizePhraseKey(value: string): string {
+function compactPhrase(value: string): string {
   return value
     .trim()
     .toLowerCase()
     .replace(/[’]/g, "'")
     .replace(/\s+/g, " ");
+}
+
+export function normalizePhraseKey(value: string): string {
+  const compact = compactPhrase(value);
+  return CANONICAL_BY_VARIANT.get(compact) ?? compact;
 }
 
 function isBoundaryCharacter(value: string | undefined): boolean {
@@ -76,16 +127,16 @@ export function findLearningPhraseMatches(text: string): PhraseMatch[] {
   const matches: PhraseMatch[] = [];
   const occupied: Array<{ start: number; end: number }> = [];
 
-  for (const phrase of SORTED_PHRASES) {
+  for (const phrase of MATCHABLE_PHRASES) {
     let cursor = 0;
 
     while (cursor < normalized.length) {
-      const start = normalized.indexOf(phrase.text, cursor);
+      const start = normalized.indexOf(phrase.matchText, cursor);
       if (start < 0) {
         break;
       }
 
-      const end = start + phrase.text.length;
+      const end = start + phrase.matchText.length;
       cursor = Math.max(end, start + 1);
 
       if (!isBoundaryCharacter(normalized[start - 1]) || !isBoundaryCharacter(normalized[end])) {
@@ -97,7 +148,8 @@ export function findLearningPhraseMatches(text: string): PhraseMatch[] {
       }
 
       matches.push({
-        ...phrase,
+        text: phrase.text,
+        priority: phrase.priority,
         surface: text.slice(start, end),
         start,
         end,
