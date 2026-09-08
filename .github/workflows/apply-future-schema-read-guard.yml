@@ -23,21 +23,8 @@ jobs:
           from pathlib import Path
           path = Path("src/shared/storage.ts")
           text = path.read_text()
-          old = """    if (localSettings.schemaVersion !== CURRENT_USER_SETTINGS_SCHEMA_VERSION) {
-      await chrome.storage.local.set({
-        [STORAGE_SETTINGS_KEY]: sanitized,
-      });
-    }
-"""
-          new = """    const storedSchemaVersion = typeof localSettings.schemaVersion === "number"
-      ? localSettings.schemaVersion
-      : 0;
-    if (storedSchemaVersion < CURRENT_USER_SETTINGS_SCHEMA_VERSION) {
-      await chrome.storage.local.set({
-        [STORAGE_SETTINGS_KEY]: sanitized,
-      });
-    }
-"""
+          old = '    if (localSettings.schemaVersion !== CURRENT_USER_SETTINGS_SCHEMA_VERSION) {\n      await chrome.storage.local.set({\n        [STORAGE_SETTINGS_KEY]: sanitized,\n      });\n    }\n'
+          new = '    const storedSchemaVersion = typeof localSettings.schemaVersion === "number"\n      ? localSettings.schemaVersion\n      : 0;\n    if (storedSchemaVersion < CURRENT_USER_SETTINGS_SCHEMA_VERSION) {\n      await chrome.storage.local.set({\n        [STORAGE_SETTINGS_KEY]: sanitized,\n      });\n    }\n'
           if old not in text:
               raise SystemExit("missing schema migration writeback anchor")
           path.write_text(text.replace(old, new, 1))
