@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/xiaoyao888888/lexiglow/stargazers">
-    <img alt="GitHub stars" src="https://img.shields.io/github/stars/xiaoyao888888/lexiglow?style=flat-square" />
+  <a href="https://github.com/ArseneWg/lexiglow/stargazers">
+    <img alt="GitHub stars" src="https://img.shields.io/github/stars/ArseneWg/lexiglow?style=flat-square" />
   </a>
-  <a href="https://github.com/xiaoyao888888/lexiglow/blob/main/LICENSE">
+  <a href="https://github.com/ArseneWg/lexiglow/blob/main/LICENSE">
     <img alt="Source Available" src="https://img.shields.io/badge/license-source--available-cb7a33?style=flat-square" />
   </a>
-  <a href="https://github.com/xiaoyao888888/lexiglow/blob/main/COMMERCIAL.md">
+  <a href="https://github.com/ArseneWg/lexiglow/blob/main/COMMERCIAL.md">
     <img alt="Commercial License Required" src="https://img.shields.io/badge/commercial-license%20required-b3261e?style=flat-square" />
   </a>
   <img alt="Chrome Extension" src="https://img.shields.io/badge/platform-Chrome%20Extension-f6c453?style=flat-square" />
@@ -45,6 +45,8 @@ LexiGlow 是一个 Chrome 英语阅读插件。它不是让你切出去背词，
 - 已支持学习语言切换：
   翻译内容和插件界面都可以跟随学习语言切换，不再固定只面向中文用户
 
+内部的 A1-C1 标签只是基于已掌握词汇量的难度估算，用于调整解释用词，不属于正式 CEFR 能力测评。
+
 ## 核心能力
 
 - 悬浮查词：
@@ -66,11 +68,20 @@ LexiGlow 是一个 Chrome 英语阅读插件。它不是让你切出去背词，
 - 学习状态累积：
   已掌握词、复习词、忽略词会持续影响后续提示
 - 常见词形归并：
-  标记 `add` 为已掌握后，`adds / added / adding` 会一起按已掌握处理；`addition / additive` 这类派生词仍单独判断
+  除规则词形外，也覆盖一组常见不规则变化；派生词仍单独判断
 - 已内置 15 种学习语言：
   `zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `de`, `es`, `pt-BR`, `ru`, `it`, `tr`, `vi`, `id`, `th`, `ar`
 
 ![LexiGlow workflow from hover lookup to sentence analysis](./assets/lexiglow-workflow.svg)
+
+## 隐私与第三方服务
+
+- LLM API Key 存放在扩展自身的私有存储中，不再写进页面侧可读取的翻译配置。
+- 默认快速翻译会把单词或选中文本发送到配置的 Google Translate 接口。
+- 语境翻译、英英解释和长难句分析会把相关文本/上下文发送到你配置的 LLM 提供商。
+- LexiGlow 本身不要求这些翻译请求经过 LexiGlow 自建后端。
+
+如果页面内容包含敏感信息，请先确认对应翻译服务或 LLM 提供商的数据处理条款符合你的使用要求。
 
 ## 安装使用
 
@@ -97,7 +108,7 @@ npm run build
 6. 点击 `Sentence Analysis`，确认会切到分析视图
 7. 打开设置页，确认可以切换学习语言，以及 `OpenAI / Compatible`、`Gemini`、`Claude`
 
-已掌握状态会自动归并常见屈折变化，包括复数、三单、过去式、过去分词和现在分词；派生词仍独立判断，因此掌握 `work` 会连带覆盖 `works / worked / working`，但不会自动覆盖 `worker` 或 `workable`。
+已掌握状态会自动归并常见屈折变化，包括复数、三单、过去式、过去分词、现在分词和一组常见不规则变化；派生词仍独立判断，因此掌握 `work` 会连带覆盖 `works / worked / working`，但不会自动覆盖 `worker` 或 `workable`。
 
 ## 许可证与商用
 
@@ -111,5 +122,8 @@ LexiGlow 当前采用源码可见许可，不是 MIT，也不是传统宽松开�
 
 - [LICENSE](./LICENSE)
 - [COMMERCIAL.md](./COMMERCIAL.md)
+- [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)
+
+项目内置的词频表存在独立的上游许可约束。LexiGlow 的商业授权本身并不自动授予该第三方数据的商业使用权；商业分发前请先阅读 `THIRD_PARTY_NOTICES.md` 并确认相关数据权利。
 
 如果你希望把本项目用于产品、公司项目、收费服务、企业部署或客户交付，请先联系作者获取商业授权。
