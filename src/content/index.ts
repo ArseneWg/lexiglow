@@ -3979,7 +3979,7 @@ function showOverlongSelectionHint(): boolean {
   });
   activeSelectionTooltipContext = null;
   activeSelectionContext = null;
-  tooltip.translationEl.dataset.visible = "false";
+  tooltip.translationEl.dataset.visible = "true";
   tooltip.metaEl.style.display = "flex";
   tooltip.llmButton.style.display = "none";
   tooltip.selectionAnalysisButton.style.display = "none";
