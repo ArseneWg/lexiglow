@@ -81,6 +81,24 @@ describe("pronunciation resolver v2", () => {
     expect(derived.every((item) => !item.audio)).toBe(true);
   });
 
+  test("does not relabel generic or Canadian pronunciation as US or UK", async () => {
+    const generic = extractKaikkiPronunciationVariants(
+      JSON.stringify({ word: "foobar", sounds: [{ tags: ["Canada"], ipa: "/ˈfuːbɑr/" }] }),
+      "foobar",
+    );
+    expect(generic[0]?.accent).toBe("en");
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => JSON.stringify({ word: "foobar", sounds: [{ ipa: "/ˈfuːbɑr/" }] }),
+    }));
+    const result = await resolvePronunciation("foobar", { fetchFn: fetchMock as never });
+    expect(result.selectedVariantIds).toEqual({});
+    expect(result.ukPhonetic).toBeUndefined();
+    expect(result.usPhonetic).toBeUndefined();
+    expect(result.ttsAllowed).toBe(true);
+  });
+
   test("returns the explicitly selected accent variant", () => {
     const result = {
       surface: "block",

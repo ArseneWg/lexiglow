@@ -135,7 +135,7 @@ function ipaEquivalent(left: string | undefined, right: string | undefined): boo
 
 function classifyAccent(tags: readonly string[] | undefined): PronunciationAccent | "en" {
   const text = (tags || []).join(" ").toLowerCase();
-  if (/\b(?:us|u\.s\.|general american|american|united states|canada|canadian)\b/.test(text)) return "en-US";
+  if (/\b(?:us|u\.s\.|general american|american|united states)\b/.test(text)) return "en-US";
   if (/\b(?:uk|u\.k\.|rp|received pronunciation|british|england|southern england|great britain)\b/.test(text)) return "en-GB";
   return "en";
 }
@@ -190,7 +190,13 @@ export function extractKaikkiPronunciationVariants(raw: string, surface: string)
         id: stableVariantId("kaikki", normalizedSurface, accent, soundIndex),
         accent,
         ipa: ipa || undefined,
-        audio: audioUrl ? { url: audioUrl, audioIpa: audioIpa || undefined } : undefined,
+        audio: audioUrl ? {
+          url: audioUrl,
+          audioIpa: audioIpa || undefined,
+          sourcePage: typeof sound.audio === "string" && sound.audio.trim()
+            ? `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(sound.audio.trim().replace(/ /g, "_"))}`
+            : undefined,
+        } : undefined,
         partOfSpeech: normalizePos(entry?.pos) || undefined,
         tags: Array.isArray(sound.tags) ? [...sound.tags] : undefined,
         source: "kaikki",
@@ -284,7 +290,7 @@ function scoreVariant(variant: PronunciationVariant, accent: PronunciationAccent
 
 function chooseVariant(variants: readonly PronunciationVariant[], accent: PronunciationAccent, partOfSpeech?: string): PronunciationVariant | undefined {
   return [...variants]
-    .filter((variant) => variant.accent === accent || variant.accent === "en")
+    .filter((variant) => variant.accent === accent)
     .sort((left, right) => scoreVariant(right, accent, partOfSpeech) - scoreVariant(left, accent, partOfSpeech))[0];
 }
 
@@ -301,7 +307,7 @@ function attachMatchingStructuredAudio(curated: PronunciationVariant[], structur
   return curated.map((variant) => {
     const match = structured.find((candidate) =>
       candidate.audio?.url &&
-      (candidate.accent === variant.accent || candidate.accent === "en") &&
+      candidate.accent === variant.accent &&
       ipaEquivalent(candidate.ipa, variant.ipa),
     );
     return match ? { ...variant, audio: match.audio } : variant;

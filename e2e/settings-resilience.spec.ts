@@ -101,26 +101,18 @@ test("pronunciation controls render accent data and dispatch the requested US sp
   await seedUserSettings(extensionWorker, { knownBaseRank: 0 });
   await mockGoogleTranslation(context, "混淆");
 
-  await context.route("https://api.dictionaryapi.dev/api/v2/entries/en/obfuscation", async (route) => {
+  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route) => {
     await route.fulfill({
       status: 200,
-      contentType: "application/json",
-      body: JSON.stringify([
-        {
-          phonetics: [
-            {
-              text: "/ˌɒbfʌsˈkeɪʃən/",
-              audio: "https://audio.test/obfuscation-uk.mp3",
-              sourceUrl: "https://audio.test/uk",
-            },
-            {
-              text: "/ˌɑːbfəsˈkeɪʃən/",
-              audio: "https://audio.test/obfuscation-us.mp3",
-              sourceUrl: "https://audio.test/us",
-            },
-          ],
-        },
-      ]),
+      contentType: "application/jsonl",
+      body: JSON.stringify({
+        word: "obfuscation",
+        pos: "noun",
+        sounds: [
+          { tags: ["UK"], ipa: "/ˌɒbfʌsˈkeɪʃən/" },
+          { tags: ["US"], ipa: "/ˌɑːbfəsˈkeɪʃən/" },
+        ],
+      }),
     });
   });
 
@@ -141,7 +133,7 @@ test("pronunciation controls render accent data and dispatch the requested US sp
 
   await expect(page.getByLabel("播放英式发音")).toBeVisible();
   await expect(page.getByLabel("播放美式发音")).toBeVisible();
-  await expect(page.locator(".wordwise-pronunciation")).toContainText("/ˌɒbfʌsˈkeiʃən/");
+  await expect(page.locator(".wordwise-pronunciation")).toContainText("/ˌɒbfʌsˈkeɪʃən/");
 
   await page.getByLabel("播放美式发音").click();
   await expect.poll(async () => {

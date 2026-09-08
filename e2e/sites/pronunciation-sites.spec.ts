@@ -21,7 +21,7 @@ async function selectWord(page: Page, word: string): Promise<boolean> {
           selection?.addRange(range);
           document.dispatchEvent(new Event("selectionchange"));
           const rect = range.getBoundingClientRect();
-          document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));
+          parent.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));
           return true;
         }
       }

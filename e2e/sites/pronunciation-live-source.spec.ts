@@ -20,7 +20,7 @@ async function selectFirstWord(page: Page, word: string): Promise<boolean> {
         selection?.addRange(range);
         document.dispatchEvent(new Event("selectionchange"));
         const rect = range.getBoundingClientRect();
-        document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));
+        parent.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));
         return true;
       }
       node = walker.nextNode() as Text | null;
@@ -35,6 +35,7 @@ test("React real page resolves live structured pronunciation data", async ({ con
   await mockGoogleTranslation(context, "组件");
   const response = await page.goto("https://react.dev/learn/your-first-component", { waitUntil: "domcontentloaded", timeout: 30_000 });
   expect(response?.status() ?? 200).toBeLessThan(400);
+  await page.waitForTimeout(600);
   expect(await selectFirstWord(page, "component")).toBe(true);
   await expect(page.locator(".wordwise-pronunciation")).toBeVisible();
   await expect(page.locator(".wordwise-pronunciation")).not.toContainText("No IPA", { timeout: 12_000 });

@@ -27,8 +27,9 @@ function silentWav(): Buffer {
   return buffer;
 }
 
-async function routePronunciation(context: Parameters<typeof test>[0] extends never ? never : any, word: string, withAudio = false) {
+async function routePronunciation(context: Parameters<typeof test>[0] extends never ? never : any, word: string, withAudio = false, delayMs = 0) {
   await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route: any) => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
     const audio = withAudio ? { "audio-ipa": "/ˌɑːbfəsˈkeɪʃən/", mp3_url: "https://audio.test/obfuscation-us.wav" } : {};
     await route.fulfill({
       status: 200,
@@ -104,6 +105,17 @@ test("context resolves refuse as a verb for selected text", async ({ context, pa
   await serveTestPage(context, page, '<p>I <span id="target">refuse</span> the offer.</p>');
   await selectElementText(page, "#target");
   await expect(page.locator(".wordwise-pronunciation")).toContainText("/rɪˈfjuːz/");
+});
+
+test("keeps playback disabled until pronunciation lookup resolves", async ({ context, page }) => {
+  await mockGoogleTranslation(context, "混淆");
+  await routePronunciation(context, "obfuscation", true, 500);
+  await serveTestPage(context, page, '<p>I study <span id="target">obfuscation</span> carefully.</p>');
+  await selectElementText(page, "#target");
+  const usButton = page.getByLabel("播放美式发音");
+  await expect(usButton).toBeVisible();
+  await expect(usButton).toBeDisabled();
+  await expect(usButton).toBeEnabled({ timeout: 3_000 });
 });
 
 test("multi-word selection keeps pronunciation controls hidden", async ({ context, page }) => {

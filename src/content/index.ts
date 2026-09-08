@@ -249,6 +249,10 @@ const TOOLTIP_STYLE = `
   .wordwise-pronunciation-action:hover {
     color: #c2410c;
   }
+  .wordwise-pronunciation-action:disabled {
+    opacity: 0.42;
+    cursor: wait;
+  }
   .wordwise-pronunciation-action[data-playing="true"] {
     color: #dc2626;
   }
@@ -3207,6 +3211,8 @@ function formatPronunciationDisplayText(value?: string, audioUrl?: string): stri
 function resetPronunciationDisplay(surface: string) {
   activePronunciationSurface = surface;
   activePronunciationResult = null;
+  tooltip.britishButton.disabled = true;
+  tooltip.americanButton.disabled = true;
   tooltip.britishPhoneticEl.textContent = "/.../";
   tooltip.americanPhoneticEl.textContent = "/.../";
 }
@@ -3252,10 +3258,14 @@ async function loadPronunciation(surface: string, contextText?: string, partOfSp
   const britishVariant = getPronunciationVariantForAccent(activePronunciationResult, "en-GB");
   const americanVariant = getPronunciationVariantForAccent(activePronunciationResult, "en-US");
   if (response.result?.confidence === "ambiguous") {
+    tooltip.britishButton.disabled = true;
+    tooltip.americanButton.disabled = true;
     tooltip.britishPhoneticEl.textContent = "Multiple pronunciations";
     tooltip.americanPhoneticEl.textContent = "Multiple pronunciations";
     return;
   }
+  tooltip.britishButton.disabled = false;
+  tooltip.americanButton.disabled = false;
   tooltip.britishPhoneticEl.textContent = formatPronunciationDisplayText(
     britishVariant?.ipa ?? response.result?.ukPhonetic,
     britishVariant?.audio?.url ?? response.result?.ukAudioUrl,
