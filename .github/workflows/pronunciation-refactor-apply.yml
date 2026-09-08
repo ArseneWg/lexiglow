@@ -1,0 +1,44 @@
+name: Pronunciation Refactor Apply
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply pronunciation refactor
+        run: node scripts/apply-pronunciation-refactor.mjs
+
+      - name: Generate pinned pronunciation data
+        run: node scripts/refresh-pronunciation-data.mjs
+
+      - name: Commit generated refactor
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No pronunciation refactor changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src scripts e2e tests package.json THIRD_PARTY_NOTICES.md README.md
+          git commit -m "Refactor pronunciation accuracy pipeline"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
