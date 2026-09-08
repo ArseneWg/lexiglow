@@ -60,7 +60,7 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 - 高亮引擎改为 **增量 + viewport-aware**：初始只登记文本节点，进入或接近视口后才分析；DOM Mutation 只处理新增或变化节点，scroll 不再重新扫描整页。
 - 高亮仍使用 CSS Highlight API，不向原网页文本注入一堆 `<span>`。
 - 用户主动划词始终尊重翻译意图，不再因为自动 proper-name 规则直接返回原文。
-- 划词原文和周边 context 分开处理：最多 1200 字符的选中原文会完整保留，不再被 220 字符上下文窗口静默截断；超过上限会明确提示“选择过长”。
+- 划词原文和周边 context 分开处理：最多 1200 字符的选中原文会完整保留，不再被 220 字符上下文窗口静默截断；超过上限会明确显示可见的“选择过长”提示，并且不会发送翻译请求。
 - 语境提取优先使用 `Intl.Segmenter`，并从上层 DOM 容器还原被 `<a> / <strong> / <span>` 拆开的完整句子。
 - 长难句分析使用带 `tokenIndex` 的结构坐标，因此一句话中多个 `that` 等重复词不会只靠“第一个文本匹配”来高亮；复合词与页面 tokenizer 使用相同的 token 边界。
 - LLM 结果在展示前会检查句块覆盖率、结构关键词数量和 token 坐标；质量不足会自动严格重试一次，第二次仍不满足要求就拒绝展示。
@@ -83,6 +83,33 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
   `zh-CN`, `zh-TW`, `ja`, `ko`, `fr`, `de`, `es`, `pt-BR`, `ru`, `it`, `tr`, `vi`, `id`, `th`, `ar`
 
 ![LexiGlow workflow from hover lookup to sentence analysis](./assets/lexiglow-workflow.svg)
+
+## 浏览器级回归测试
+
+项目除了单元测试外，还会用 Playwright 启动真实的 Chromium persistent profile，并加载 MV3 扩展运行浏览器 E2E。测试覆盖真正的 service worker、content script、Shadow DOM tooltip、CSS Highlight API、Selection / Range、Popup / Options、动态 DOM 和本地持久化状态。
+
+当前共有 **18 条 Chromium 用户流程**，包括：
+
+- 悬停翻译 → 已掌握 → 刷新后保持状态
+- 双击已掌握词 → 继续学习 / spaced relearning
+- Ignore 与 Options 中取消忽略
+- `accounted for` 等变形短语统一到 canonical 学习 key
+- `mixed-precision` 等连字符复合词作为一个词汇单元
+- `Machine Learning` 这类 Title Case 主动划词仍然执行翻译
+- Google ↔ 语境 LLM 双向切换
+- Popup 阈值变化即时刷新当前页面
+- Options 修改 review trigger、学习语言和 LLM profile 后即时生效
+- 长划词完整保留超过旧 220 字符窗口的原文
+- 超过 1200 字符的划词显示可见限制提示且不发送翻译流量
+- 长难句不完整结果自动 retry，并准确定位重复 `that` 中指定的 token
+- UK / US 音标和发音操作消息链路
+- 同一个 Chromium user-data-dir 重启后学习状态仍保留
+- 被 inline DOM 拆开的句子能还原完整语境
+- 1200 行大页面的 viewport 高亮与滚动加载
+- MutationObserver 动态插入处理
+- SPA subtree 替换后清理旧高亮并发现新路由内容
+
+翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。
 
 ## 隐私与第三方服务
 
@@ -121,7 +148,7 @@ npm run build
 
 ## 质量门
 
-PR 会执行可复现依赖安装、高危依赖审计、词表生成、TypeScript 类型检查、单元测试和生产构建。正式发布前仍建议在代表性的文章页和 SPA 页面上做浏览器人工 smoke test，尤其是 content-script 交互发生变化时。
+PR 会执行可复现依赖安装、高危依赖审计、词表生成、TypeScript 类型检查、136 条单元测试、生产构建，以及 18 条真实 Chromium 扩展 E2E。E2E 失败时会保留 trace、截图和 HTML diagnostics；正式发布前仍建议在代表性的真实文章页和 SPA 页面上做一次人工 smoke test，以覆盖站点特定 CSS / layout 边界。
 
 ## 许可证与商用
 
