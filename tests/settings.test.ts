@@ -45,7 +45,7 @@ describe("settings resolution", () => {
     expect(flags.isKnown).toBe(true);
   });
 
-  test("treats common inflections as the same mastered word", () => {
+  test("treats high-confidence common inflections as the same mastered word", () => {
     const settings = setWordMastered(DEFAULT_SETTINGS, "add");
     expect(settings.masteredOverrides).toContain("add");
     expect(resolveWordFlags("add", lookupRank("add"), settings, "add").isKnown).toBe(true);
@@ -64,15 +64,17 @@ describe("settings resolution", () => {
     expect(additiveFlags.shouldTranslate).toBe(true);
   });
 
-  test("stores unmastered inflections under the same mastery key", () => {
+  test("stores safe unmastered inflections under the same mastery key", () => {
     const settings = setWordUnmastered(DEFAULT_SETTINGS, "added", lookupRank("added"));
     expect(settings.unmasteredOverrides).toContain("add");
     expect(resolveWordFlags("adding", lookupRank("adding"), settings, "adding").shouldTranslate).toBe(true);
   });
 
-  test("maps -ves plurals back to the mastered base lemma", () => {
-    const settings = setWordMastered(DEFAULT_SETTINGS, "life");
-    expect(resolveWordFlags("lives", lookupRank("lives"), settings, "lives").isKnown).toBe(true);
+  test("keeps ambiguous surface forms independent instead of corrupting mastery", () => {
+    const settings = setWordMastered(updateKnownBaseRank(DEFAULT_SETTINGS, 0), "life");
+    const lives = resolveWordFlags("lives", lookupRank("lives"), settings, "lives");
+    expect(lives.isKnown).toBe(false);
+    expect(lives.shouldTranslate).toBe(true);
   });
 
   test("ignored words override mastery", () => {
@@ -111,6 +113,7 @@ describe("settings resolution", () => {
 
     expect(cleared.wordReviewTrigger).toBe("selection");
     expect(cleared.masteredOverrides).toEqual([]);
+    expect(cleared.learningProgress).toEqual({});
   });
 
   test("subtracts forced-unmastered base words from total known count", () => {
@@ -128,14 +131,15 @@ describe("settings resolution", () => {
     ).toBe("B2");
   });
 
-  test("treats likely names or branded terms outside the lexicon as ignored", () => {
-    expect(looksLikeSpecialTerm("Alice", "alice", null)).toBe(true);
-    expect(looksLikeSpecialTerm("ClaudeCode", "claudecode", null)).toBe(true);
+  test("does not suppress learnable words merely because they are title-cased", () => {
+    expect(looksLikeSpecialTerm("Alice", "alice", null)).toBe(false);
+    expect(looksLikeSpecialTerm("Obfuscation", "obfuscation", null)).toBe(false);
+    expect(looksLikeSpecialTerm("Torvalds", "torvalds", 9000)).toBe(false);
     expect(looksLikeSpecialTerm("received", "received", 891)).toBe(false);
   });
 
-  test("treats title-cased low-frequency words and handle-like clusters as ignored", () => {
-    expect(looksLikeSpecialTerm("Torvalds", "torvalds", 9000)).toBe(true);
+  test("still filters strong identifier and handle signals", () => {
+    expect(looksLikeSpecialTerm("ClaudeCode", "claudecode", null)).toBe(true);
     expect(looksLikeSpecialTerm("swyx", "swyx", null)).toBe(true);
   });
 
@@ -147,7 +151,7 @@ describe("settings resolution", () => {
     expect(resolveWordFlags("beijing", null, DEFAULT_SETTINGS, "beijing").shouldTranslate).toBe(false);
   });
 
-  test("treats author handles and full names as contextual special terms", () => {
+  test("treats contextual author handles and full names as special terms", () => {
     expect(
       looksLikeContextualSpecialTerm("gbarber", "gbarber 3 hours ago | next [–]"),
     ).toBe(true);
