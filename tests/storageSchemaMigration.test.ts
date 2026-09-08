@@ -53,4 +53,42 @@ describe("persistent settings schema migration", () => {
     expect(localSet).not.toHaveBeenCalled();
     expect(syncGet).not.toHaveBeenCalled();
   });
+
+  test("does not overwrite a record from a newer settings schema during read migration", async () => {
+    const futureVersion = CURRENT_USER_SETTINGS_SCHEMA_VERSION + 3;
+    const futureRecord = {
+      schemaVersion: futureVersion,
+      knownBaseRank: 3900,
+      masteredOverrides: ["written"],
+      unmasteredOverrides: [],
+      ignoredWords: [],
+      wordReviewTrigger: "selection",
+      futureOnlyField: { preserve: true },
+    };
+    const localSet = vi.fn(async () => undefined);
+
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn(async (key: string) => ({
+            [key]: key === STORAGE_SETTINGS_KEY ? futureRecord : undefined,
+          })),
+          set: localSet,
+        },
+        sync: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => undefined),
+        },
+      },
+    });
+
+    const runtimeView = await getSettings();
+    expect(runtimeView.schemaVersion).toBe(CURRENT_USER_SETTINGS_SCHEMA_VERSION);
+    expect(runtimeView.masteredOverrides).toContain("write");
+    expect(localSet).not.toHaveBeenCalled();
+    expect(futureRecord).toEqual(expect.objectContaining({
+      schemaVersion: futureVersion,
+      futureOnlyField: { preserve: true },
+    }));
+  });
 });
