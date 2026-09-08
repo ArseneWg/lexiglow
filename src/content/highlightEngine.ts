@@ -194,7 +194,10 @@ export function createIncrementalHighlightEngine(options: EngineOptions) {
       // Article-local repetition is a learning-priority signal. Upgrade earlier
       // occurrences once when the real occurrence count crosses the threshold;
       // reprocessing the same node has delta=0 and cannot inflate this count.
-      if (beforeArticle < 3 && afterArticle >= 3) {
+      if (
+      (beforeArticle < 3 && afterArticle >= 3) ||
+      (beforeArticle >= 3 && afterArticle < 3)
+    ) {
         for (const relatedNode of nodesByKey.get(key) ?? []) {
           if (relatedNode !== node) {
             queuedNodes.add(relatedNode);

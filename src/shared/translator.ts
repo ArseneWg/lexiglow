@@ -1,6 +1,7 @@
 import { t } from "./i18n";
 import { lookupRank, resolveLookupLemma } from "./lexicon";
 import { countTotalKnown, estimateLearnerLevel, resolveWordFlags } from "./settings";
+import { createEnglishTokenMatcher } from "./word";
 import type {
   EnglishExplanationResult,
   LearnerLevelBand,
@@ -1170,7 +1171,7 @@ interface AnalysisToken { index: number; text: string; start: number; end: numbe
 
 function tokenizeSentenceForAnalysis(sentence: string): AnalysisToken[] {
   const tokens: AnalysisToken[] = [];
-  const matcher = /[A-Za-z]+(?:['’][A-Za-z]+)?/g;
+  const matcher = createEnglishTokenMatcher();
   let match = matcher.exec(sentence);
   let index = 0;
   while (match) {
