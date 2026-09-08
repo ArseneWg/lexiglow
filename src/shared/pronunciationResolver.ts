@@ -408,7 +408,10 @@ function buildResult(surface: string, variants: PronunciationVariant[], confiden
   };
 }
 
-export function getPronunciationVariantForAccent(result: PronunciationResult | null | undefined, accent: PronunciationAccent): PronunciationVariant | undefined {
+export function getPronunciationVariantForAccent(
+  result: (Pick<PronunciationResult, "selectedVariantIds"> & { variants: readonly PronunciationVariant[] }) | null | undefined,
+  accent: PronunciationAccent,
+): PronunciationVariant | undefined {
   if (!result) return undefined;
   const id = result.selectedVariantIds?.[accent];
   if (!id) return undefined;
