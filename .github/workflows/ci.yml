@@ -23,23 +23,11 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Use current npm
-        run: npm install --global npm@11
-
-      - name: Refresh dependency lockfile
-        run: |
-          rm package-lock.json
-          npm install --package-lock-only --ignore-scripts
-
-      - name: Upload refreshed lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: refreshed-package-lock
-          path: package-lock.json
-          retention-days: 1
-
       - name: Install dependencies
         run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
       - name: Prepare lexicon
         run: npm run prepare:lexicon
