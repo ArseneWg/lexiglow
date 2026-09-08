@@ -25,6 +25,9 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Use current npm
+        run: npm install --global npm@11
+
       - name: Refresh package lock
         run: |
           rm package-lock.json
