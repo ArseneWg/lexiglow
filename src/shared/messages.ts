@@ -120,6 +120,8 @@ export interface LookupPronunciationMessage {
   type: "LOOKUP_PRONUNCIATION";
   payload: {
     surface: string;
+    contextText?: string;
+    partOfSpeech?: string;
   };
 }
 

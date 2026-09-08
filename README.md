@@ -129,3 +129,7 @@ See:
 - [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)
 
 The bundled word-frequency data has separate upstream rights considerations. A commercial LexiGlow license does not automatically grant commercial rights to that third-party data; review `THIRD_PARTY_NOTICES.md` before commercial distribution.
+
+### Pronunciation accuracy pipeline
+
+LexiGlow treats pronunciation as a lexical-reading problem rather than a spelling-only TTS action. Exact single-word selections receive UK/US pronunciation when available. Structured Kaikki/Wiktextract pronunciation variants are kept atomic (IPA, audio/audio-IPA, accent/POS tags), pinned offline CMUdict/Britfone subsets provide reproducible fallback data, common heteronyms are resolved from context/POS when confidence is high, and regular -s/-ed/-ing forms can be derived from the base phonemes without reusing base-word audio. Human lexical audio is played before Chrome TTS; TTS always receives the exact selected surface and is disabled for unresolved ambiguous heteronyms. Source IPA is displayed without destructive DJ-style conversion.

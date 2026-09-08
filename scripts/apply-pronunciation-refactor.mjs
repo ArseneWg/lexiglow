@@ -757,7 +757,7 @@ async function selectWord(page: Page, word: string): Promise<boolean> {
   return page.evaluate((target) => {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode() as Text | null;
-    const pattern = new RegExp("\\b" + target.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&") + "\\b", "i");
+    const pattern = new RegExp("\\b" + target + "\\b", "i");
     while (node) {
       const parent = node.parentElement;
       if (parent && !parent.closest("script, style, noscript, input, textarea, select, option, code, pre")) {
