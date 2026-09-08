@@ -8,6 +8,7 @@ export interface LearningProgressEntry {
 }
 
 export interface UserSettings {
+  schemaVersion: number;
   knownBaseRank: number;
   masteredOverrides: string[];
   unmasteredOverrides: string[];

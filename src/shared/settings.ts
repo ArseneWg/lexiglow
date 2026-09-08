@@ -9,7 +9,10 @@ import type {
   WordFlags,
 } from "./types";
 
+export const CURRENT_USER_SETTINGS_SCHEMA_VERSION = 2;
+
 export const DEFAULT_SETTINGS: UserSettings = {
+  schemaVersion: CURRENT_USER_SETTINGS_SCHEMA_VERSION,
   knownBaseRank: DEFAULT_KNOWN_BASE_RANK,
   masteredOverrides: [],
   unmasteredOverrides: [],
@@ -257,6 +260,7 @@ export function sanitizeSettings(input?: Partial<UserSettings> | null): UserSett
   }
 
   return {
+    schemaVersion: CURRENT_USER_SETTINGS_SCHEMA_VERSION,
     knownBaseRank,
     masteredOverrides,
     unmasteredOverrides,
