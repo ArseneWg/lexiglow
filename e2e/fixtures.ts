@@ -1,4 +1,6 @@
+import os from "node:os";
 import path from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
 
 import {
   chromium,
@@ -14,23 +16,40 @@ interface ExtensionFixtures {
   page: Page;
   extensionWorker: Worker;
   extensionId: string;
+  extensionPath: string;
+  userDataDir: string;
+}
+
+export async function launchExtensionContext(
+  userDataDir: string,
+  extensionPath: string,
+): Promise<BrowserContext> {
+  return chromium.launchPersistentContext(userDataDir, {
+    channel: "chromium",
+    headless: true,
+    viewport: { width: 1280, height: 800 },
+    args: [
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`,
+    ],
+  });
 }
 
 export const test = base.extend<ExtensionFixtures>({
-  context: async ({}, use) => {
-    const extensionPath = path.resolve(process.cwd());
-    const context = await chromium.launchPersistentContext("", {
-      channel: "chromium",
-      headless: true,
-      viewport: { width: 1280, height: 800 },
-      args: [
-        `--disable-extensions-except=${extensionPath}`,
-        `--load-extension=${extensionPath}`,
-      ],
-    });
+  extensionPath: async ({}, use) => {
+    await use(path.resolve(process.cwd()));
+  },
 
+  userDataDir: async ({}, use) => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "lexiglow-e2e-"));
+    await use(directory);
+    await rm(directory, { recursive: true, force: true });
+  },
+
+  context: async ({ extensionPath, userDataDir }, use) => {
+    const context = await launchExtensionContext(userDataDir, extensionPath);
     await use(context);
-    await context.close();
+    await context.close().catch(() => {});
   },
 
   page: async ({ context }, use) => {
