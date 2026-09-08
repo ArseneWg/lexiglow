@@ -1,0 +1,42 @@
+name: Patch overlong selection tooltip
+
+on:
+  push:
+    branches: [fix/review-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/review-hardening
+
+      - name: Show overlong selection feedback
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/content/index.ts')
+          text = path.read_text()
+          old = '''  tooltip.translationEl.dataset.visible = "false";\n  tooltip.metaEl.style.display = "none";\n  tooltip.llmButton.style.display = "none";'''
+          new = '''  tooltip.translationEl.dataset.visible = "false";\n  tooltip.metaEl.style.display = "flex";\n  tooltip.llmButton.style.display = "none";'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one overlong selection meta block, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/patch-overlong-selection-tooltip.yml
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Show overlong selection feedback"
+          git push origin HEAD:fix/review-hardening
