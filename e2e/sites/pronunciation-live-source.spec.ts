@@ -20,7 +20,7 @@ async function selectFirstWord(page: Page, word: string): Promise<boolean> {
         selection?.addRange(range);
         document.dispatchEvent(new Event("selectionchange"));
         const rect = range.getBoundingClientRect();
-        parent.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));
+        document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));
         return true;
       }
       node = walker.nextNode() as Text | null;

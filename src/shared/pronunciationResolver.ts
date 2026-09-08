@@ -62,8 +62,8 @@ const HETERONYM_READINGS: Readonly<Record<string, readonly CuratedReading[]>> = 
     { partOfSpeech: "adjective", us: "/laɪv/", gb: "/laɪv/", context: /\blive\s+(?:music|show|event|stream|broadcast|performance|coverage)\b/i },
   ],
   read: [
-    { partOfSpeech: "verb-past", us: "/rɛd/", gb: "/red/", context: /\b(?:yesterday|last\s+(?:night|week|year)|already|had|ago)\b/i },
-    { partOfSpeech: "verb", us: "/riːd/", gb: "/riːd/", context: /\b(?:to|will|would|can|could|should|please|i|you|we|they)\s+read\b/i },
+    { partOfSpeech: "verb-past", us: "/rɛd/", gb: "/red/", context: /(?:\bread\b[^.!?]{0,80}\b(?:yesterday|last\s+(?:night|week|year)|ago)\b|\b(?:have|has|had)\s+(?:already\s+)?read\b)/i },
+    { partOfSpeech: "verb", us: "/riːd/", gb: "/riːd/", context: /\b(?:(?:to|will|would|can|could|should|please)\s+read|(?:i|you|we|they)\s+read\s+(?:every|each|often|usually|daily|regularly|books?|articles?|news|aloud))\b/i },
   ],
   present: [
     { partOfSpeech: "verb", us: "/prɪˈzɛnt/", gb: "/prɪˈzent/", context: /\b(?:to|will|would|can|could|should|please)\s+present\b/i },
@@ -82,7 +82,7 @@ const HETERONYM_READINGS: Readonly<Record<string, readonly CuratedReading[]>> = 
     { partOfSpeech: "noun", us: "/juːs/", gb: "/juːs/", context: /\b(?:a|the|this|that|its|their|common|practical)\s+use\b/i },
   ],
   used: [
-    { partOfSpeech: "verb-past", us: "/juːzd/", gb: "/juːzd/", context: /\b(?:i|you|we|they|he|she|it)\s+used\b/i },
+    { partOfSpeech: "verb-past", us: "/juːzd/", gb: "/juːzd/", context: /\b(?:i|you|we|they|he|she|it)\s+used(?!\s+to\b)/i },
     { partOfSpeech: "used-to", us: "/juːst/", gb: "/juːst/", context: /\bused\s+to\b/i },
   ],
 };
@@ -110,7 +110,11 @@ function normalizePos(value: string | undefined): string {
 }
 
 function stripIpaDelimiters(value: string | undefined): string {
-  return (value || "").trim().replace(/^[/[]+|[/\]]+$/g, "");
+  const trimmed = (value || "").trim();
+  if ((trimmed.startsWith("/") && trimmed.endsWith("/")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }
 
 function canonicalIpa(value: string | undefined): string {
