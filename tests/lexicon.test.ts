@@ -13,10 +13,26 @@ describe("lexicon lookup", () => {
     expect(lookupRank(resolveLookupLemma("houses"))).not.toBeNull();
   });
 
-  test("uses base forms for mastery keys when an inflected form is ranked", () => {
+  test("uses safe regular and irregular base forms for mastery", () => {
     expect(resolveMasteryKey("added")).toBe("add");
     expect(resolveMasteryKey("adding")).toBe("add");
-    expect(resolveMasteryKey("houses")).toBe("house");
+    expect(resolveMasteryKey("worked")).toBe("work");
+    expect(resolveMasteryKey("went")).toBe("go");
+    expect(resolveMasteryKey("written")).toBe("write");
     expect(resolveMasteryKey("addition")).toBe("addition");
+  });
+
+  test("does not falsely merge lexical words that merely look inflected", () => {
+    expect(resolveMasteryKey("news")).toBe("news");
+    expect(resolveMasteryKey("morning")).toBe("morning");
+    expect(resolveMasteryKey("hundred")).toBe("hundred");
+    expect(resolveMasteryKey("lives")).toBe("lives");
+    expect(resolveMasteryKey("saw")).toBe("saw");
+    expect(resolveMasteryKey("left")).toBe("left");
+  });
+
+  test("uses normalized multi-word phrases as independent mastery keys", () => {
+    expect(resolveMasteryKey("Take   Into Account")).toBe("take into account");
+    expect(resolveLookupLemma("Take Into Account")).toBe("take into account");
   });
 });
