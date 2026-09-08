@@ -24,7 +24,9 @@ jobs:
           cache: npm
 
       - name: Refresh dependency lockfile
-        run: npm install --package-lock-only --ignore-scripts
+        run: |
+          rm package-lock.json
+          npm install --package-lock-only --ignore-scripts
 
       - name: Upload refreshed lockfile
         uses: actions/upload-artifact@v4
