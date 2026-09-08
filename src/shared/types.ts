@@ -1,9 +1,19 @@
+export interface LearningProgressEntry {
+  status: "learning" | "known" | "ignored";
+  familiarity: number;
+  exposures: number;
+  successes: number;
+  lastSeenAt?: number;
+  nextReviewAt?: number;
+}
+
 export interface UserSettings {
   knownBaseRank: number;
   masteredOverrides: string[];
   unmasteredOverrides: string[];
   ignoredWords: string[];
   wordReviewTrigger: "doubleClick" | "selection";
+  learningProgress: Record<string, LearningProgressEntry>;
 }
 
 export type SupportedLearnerLanguageCode =
@@ -47,6 +57,7 @@ export interface TranslatorSettingsState {
 }
 
 export type LearnerLevelBand = "A1" | "A2" | "B1" | "B2" | "C1";
+export type HighlightIntensity = "strong" | "normal" | "weak";
 
 export interface TranslationResult {
   translation: string;
@@ -93,6 +104,9 @@ export type SentenceHighlightCategory =
 export interface SentenceHighlight {
   text: string;
   category: SentenceHighlightCategory;
+  tokenIndex?: number;
+  start?: number;
+  end?: number;
 }
 
 export type SentenceClauseBlockType =
