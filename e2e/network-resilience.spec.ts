@@ -88,9 +88,8 @@ test("LLM authentication failure without fallback stays a visible non-destructiv
   await serveTestPage(context, page, '<p>We study <span id="target">obfuscation</span> carefully.</p>');
   await page.locator("#target").hover();
 
-  const hint = page.locator('.wordwise-hint[data-kind="status"][data-visible="true"]');
-  await expect(hint).toBeVisible();
-  await expect(hint).not.toHaveText("");
+  await expect(page.locator(".wordwise-primary-translation")).toContainText("翻译暂不可用");
+  await expect(page.locator(".wordwise-card")).toBeVisible();
   expect(googleCalls).toBe(0);
 });
 
