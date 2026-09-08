@@ -17,6 +17,14 @@ describe("extractWordAtOffset", () => {
     });
   });
 
+  test("extracts contractions with typographic apostrophes", () => {
+    expect(extractWordAtOffset("I don’t know", 4)).toEqual({
+      surface: "don’t",
+      start: 2,
+      end: 7,
+    });
+  });
+
   test("skips non-english tokens", () => {
     expect(extractWordAtOffset("abc123", 2)).toBeNull();
   });
@@ -92,6 +100,7 @@ describe("selection helpers", () => {
   test("detects a single english word", () => {
     expect(isSingleEnglishWord("received")).toBe(true);
     expect(isSingleEnglishWord("received.")).toBe(true);
+    expect(isSingleEnglishWord("don’t")).toBe(true);
     expect(isSingleEnglishWord("mixed-precision")).toBe(false);
     expect(isSingleEnglishWord("look up")).toBe(false);
   });
@@ -100,11 +109,13 @@ describe("selection helpers", () => {
     expect(normalizeSingleEnglishWord("\"received.\"")).toBe("received");
     expect(normalizeSingleEnglishWord("(continue)")).toBe("continue");
     expect(normalizeSingleEnglishWord("worked,")).toBe("worked");
+    expect(normalizeSingleEnglishWord("don’t")).toBe("don't");
     expect(normalizeSingleEnglishWord("high-impact")).toBe("");
   });
 
   test("accepts english words, phrases, and sentences", () => {
     expect(isEnglishSelectionText("received")).toBe(true);
+    expect(isEnglishSelectionText("don’t stop reading")).toBe(true);
     expect(isEnglishSelectionText("look up")).toBe(true);
     expect(isEnglishSelectionText("He received the package yesterday.")).toBe(true);
     expect(isEnglishSelectionText("Revenue grew by 12.5% in Q4/FY2025.")).toBe(true);
@@ -136,5 +147,6 @@ describe("selection helpers", () => {
   test("counts english words in normalized selections", () => {
     expect(countEnglishWords("in   charge   of")).toBe(3);
     expect(countEnglishWords("mixed-precision")).toBe(2);
+    expect(countEnglishWords("don’t stop")).toBe(2);
   });
 });
