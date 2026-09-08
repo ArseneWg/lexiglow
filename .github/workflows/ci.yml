@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare lexicon
+        run: npm run prepare:lexicon
+
       - name: Typecheck
         run: npm run typecheck
 
