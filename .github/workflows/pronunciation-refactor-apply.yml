@@ -42,7 +42,7 @@ jobs:
       - name: Generate pinned pronunciation data
         run: node scripts/refresh-pronunciation-data.mjs
 
-      - name: Repair pronunciation compatibility types
+      - name: Repair pronunciation correctness and compatibility
         shell: bash
         run: |
           python - <<'PY'
@@ -62,7 +62,25 @@ jobs:
             'export function getPronunciationVariantForAccent(result: PronunciationResult | null | undefined, accent: PronunciationAccent): PronunciationVariant | undefined {',
             'export function getPronunciationVariantForAccent(\n  result: (Pick<PronunciationResult, "selectedVariantIds"> & { variants: readonly PronunciationVariant[] }) | null | undefined,\n  accent: PronunciationAccent,\n): PronunciationVariant | undefined {',
           )
+          text = text.replace(
+            '{ partOfSpeech: "verb-past", us: "/rɛd/", gb: "/red/", context: /\\b(?:yesterday|last\\s+(?:night|week|year)|already|had|ago)\\b/i },\n    { partOfSpeech: "verb", us: "/riːd/", gb: "/riːd/", context: /\\b(?:to|will|would|can|could|should|please|i|you|we|they)\\s+read\\b/i },',
+            '{ partOfSpeech: "verb-past", us: "/rɛd/", gb: "/red/", context: /(?:\\bread\\b[^.!?]{0,80}\\b(?:yesterday|last\\s+(?:night|week|year)|ago)\\b|\\b(?:have|has|had)\\s+(?:already\\s+)?read\\b)/i },\n    { partOfSpeech: "verb", us: "/riːd/", gb: "/riːd/", context: /\\b(?:(?:to|will|would|can|could|should|please)\\s+read|(?:i|you|we|they)\\s+read\\s+(?:every|each|often|usually|daily|regularly|books?|articles?|news|aloud))\\b/i },',
+          )
+          text = text.replace(
+            '{ partOfSpeech: "verb-past", us: "/juːzd/", gb: "/juːzd/", context: /\\b(?:i|you|we|they|he|she|it)\\s+used\\b/i },',
+            '{ partOfSpeech: "verb-past", us: "/juːzd/", gb: "/juːzd/", context: /\\b(?:i|you|we|they|he|she|it)\\s+used(?!\\s+to\\b)/i },',
+          )
+          text = text.replace(
+            'function stripIpaDelimiters(value: string | undefined): string {\n  return (value || "").trim().replace(/^[/[]+|[/\\]]+$/g, "");\n}',
+            'function stripIpaDelimiters(value: string | undefined): string {\n  const trimmed = (value || "").trim();\n  if ((trimmed.startsWith("/") && trimmed.endsWith("/")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {\n    return trimmed.slice(1, -1);\n  }\n  return trimmed;\n}',
+          )
           resolver.write_text(text)
+
+          for path_name in ['e2e/sites/pronunciation-sites.spec.ts', 'e2e/sites/pronunciation-live-source.spec.ts']:
+            path = Path(path_name)
+            text = path.read_text()
+            text = text.replace('parent.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));', 'document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: rect.left + 2, clientY: rect.top + 2 }));')
+            path.write_text(text)
           PY
 
       - name: Commit generated refactor
