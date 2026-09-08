@@ -1,17 +1,18 @@
-name: CI
+name: Release Artifact
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
-  pull_request:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
 
 jobs:
-  verify:
+  package:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -22,6 +23,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Verify release tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION"
 
       - name: Install dependencies
         run: npm ci
@@ -41,12 +48,8 @@ jobs:
       - name: Build extension
         run: npm run build
 
-      - name: Validate reproducible release package
-        run: |
-          npm run release:package
-          cp release/SHA256SUMS /tmp/lexiglow-first-sha256
-          npm run release:package
-          diff -u /tmp/lexiglow-first-sha256 release/SHA256SUMS
+      - name: Package release artifact
+        run: npm run release:package
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
@@ -54,13 +57,12 @@ jobs:
       - name: Browser E2E
         run: npm run test:e2e
 
-      - name: Upload E2E diagnostics
-        if: failure()
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-e2e-diagnostics
+          name: lexiglow-${{ github.ref_name }}
           path: |
-            playwright-report
-            test-results/e2e
-          if-no-files-found: ignore
-          retention-days: 7
+            release/*.zip
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30

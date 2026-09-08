@@ -1,5 +1,5 @@
 import { STORAGE_SETTINGS_KEY, STORAGE_TRANSLATOR_SETTINGS_KEY } from "./constants";
-import { DEFAULT_SETTINGS, sanitizeSettings } from "./settings";
+import { CURRENT_USER_SETTINGS_SCHEMA_VERSION, DEFAULT_SETTINGS, sanitizeSettings } from "./settings";
 import {
   DEFAULT_TRANSLATOR_PROFILE,
   DEFAULT_TRANSLATOR_SETTINGS,
@@ -225,7 +225,16 @@ export async function getSettings(): Promise<UserSettings> {
   const localSettings = localResult[STORAGE_SETTINGS_KEY] as Partial<UserSettings> | undefined;
 
   if (localSettings) {
-    return sanitizeSettings(localSettings);
+    const sanitized = sanitizeSettings(localSettings);
+    const storedSchemaVersion = typeof localSettings.schemaVersion === "number"
+      ? localSettings.schemaVersion
+      : 0;
+    if (storedSchemaVersion < CURRENT_USER_SETTINGS_SCHEMA_VERSION) {
+      await chrome.storage.local.set({
+        [STORAGE_SETTINGS_KEY]: sanitized,
+      });
+    }
+    return sanitized;
   }
 
   const syncResult = await chrome.storage.sync.get(STORAGE_SETTINGS_KEY);

@@ -88,7 +88,7 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 
 项目除了单元测试外，还会用 Playwright 启动真实的 Chromium persistent profile，并加载 MV3 扩展运行浏览器 E2E。测试覆盖真正的 service worker、content script、Shadow DOM tooltip、CSS Highlight API、Selection / Range、Popup / Options、动态 DOM 和本地持久化状态。
 
-当前共有 **18 条 Chromium 用户流程**，包括：
+当前共有 **24 条 Chromium 用户流程**，除原有阅读流覆盖外，还新增数据备份恢复、网络失败与异步竞态场景，包括：
 
 - 悬停翻译 → 已掌握 → 刷新后保持状态
 - 双击已掌握词 → 继续学习 / spaced relearning
@@ -108,8 +108,21 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 - 1200 行大页面的 viewport 高亮与滚动加载
 - MutationObserver 动态插入处理
 - SPA subtree 替换后清理旧高亮并发现新路由内容
+- Options 导出真实 JSON 备份、确认不含 API Key、再导入恢复学习状态，并保留同 profile ID 的本机 secret
+- LLM 429 / malformed JSON 按配置回退 Google；401 且关闭 fallback 时显示明确失败结果且不偷跑 Google
+- 慢返回的旧 hover 请求不能覆盖新词 tooltip
+- 用户关闭 selection tooltip 后，迟到的 LLM 响应不能把 UI 重新弹出来
 
-当前验证基线为 **12 个 Vitest 文件 / 136 条单元测试 + 18 / 18 条 Playwright Chromium 扩展 E2E**。翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。E2E 失败时会保留 trace、截图、HTML 报告和测试结果 diagnostics。
+当前验证基线为 **16 个 Vitest 文件 / 148 条单元测试 + 24 / 24 条 Playwright Chromium 扩展 E2E**。翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。E2E 失败时会保留 trace、截图、HTML 报告和测试结果 diagnostics。另有独立、非阻塞的真实公网 Site Smoke 持续覆盖 GitHub、Hacker News、MDN、web.dev、React 文档，以及 CI 出口未被限制时的 Reddit。
+
+## 长期数据安全与发布产物
+
+- 用户学习设置现在带明确 schema version。旧的本地记录会净化并一次性迁移到 schema v2；如果读到比当前扩展更新的 schema，仅生成兼容运行视图，不会因为一次读取就把未来版本记录回写覆盖。
+- Options 新增“备份与恢复”。导出包含长期学习状态和不含 secret 的翻译 profile 配置，JSON 备份永远不会写入 API Key。
+- 导入会校验 LexiGlow 备份格式、版本和大小，并净化旧结构；只有导入 profile ID 与本机已有 profile ID 相同，才会继续保留该 profile 的本机 API Key。
+- `npm run release:package` 会生成 `release/lexiglow-<version>.zip` 与 `SHA256SUMS`。ZIP 只包含 `manifest.json` 和生产 `dist/**`，并检查 package/manifest 版本一致性和 manifest 引用的运行文件是否存在。
+- PR CI 会对同一源码连续打包两次并要求 SHA256 完全一致；tag 发布还要求 `vX.Y.Z` 与 `package.json` version 一致，然后重新执行单测、build 和 Chromium E2E 后才上传产物。
+- tooltip 生命周期收敛为显式 session：hidden / hoverWord / reviewWord / selection / analysisPrompt / analysis，避免多个布尔值和字符串状态在异步请求中发生漂移。
 
 ## 隐私与第三方服务
 
@@ -148,7 +161,7 @@ npm run build
 
 ## 质量门
 
-PR 会执行可复现依赖安装、高危依赖审计、词表生成、TypeScript 类型检查、136 条单元测试、生产构建，以及 18 条真实 Chromium 扩展 E2E。E2E 失败时会保留 trace、截图和 HTML diagnostics；正式发布前仍建议在代表性的真实文章页和 SPA 页面上做一次人工 smoke test，以覆盖站点特定 CSS / layout 边界。
+PR 会执行可复现依赖安装、高危依赖审计、词表生成、TypeScript 类型检查、148 条单元测试、生产构建、两次 release 打包 SHA 一致性校验，以及 24 条真实 Chromium 扩展 E2E。E2E 失败时会保留 trace、截图和 HTML diagnostics；独立 Site Smoke 继续提供真实公网兼容性预警，正式发布前仍建议做一次人工视觉/交互 smoke test。
 
 ## 许可证与商用
 
