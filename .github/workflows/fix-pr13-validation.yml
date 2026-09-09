@@ -1,0 +1,52 @@
+name: Fix PR 13 validation
+
+on:
+  push:
+    branches:
+      - fix/default-lexical-pronunciation-ux
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/default-lexical-pronunciation-ux
+      - name: Fix optional context and real Quesma target
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/content/index.ts')
+          text = path.read_text()
+          old = '''    void loadLexicalMetadata(\n      result.surface,\n      requestContext.contextText,\n      result.partOfSpeech,\n      result.translation,\n    );'''
+          new = '''    void loadLexicalMetadata(\n      result.surface,\n      requestContext.contextText ?? result.surface,\n      result.partOfSpeech,\n      result.translation,\n    );'''
+          if old not in text:
+              raise SystemExit('content anchor missing')
+          path.write_text(text.replace(old, new, 1))
+
+          path = Path('e2e/sites/default-lexical-ux-sites.spec.ts')
+          text = path.read_text()
+          text = text.replace(
+              'test("web.dev default Google card visibly enriches predictions and keeps offline IPA",',
+              'test("Quesma default Google card visibly enriches predictions and keeps offline IPA",',
+          )
+          old_url = 'https://web.dev/articles/prerender-pages'
+          new_url = 'https://quesma.com/blog/qwen38-27b-quantizations-benchmarked/'
+          if old_url not in text:
+              raise SystemExit('site URL anchor missing')
+          path.write_text(text.replace(old_url, new_url, 1))
+          PY
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/fix-pr13-validation.yml
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Validate default lexical UX on the reported Quesma page"
+          git push origin HEAD:fix/default-lexical-pronunciation-ux
