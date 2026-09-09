@@ -143,7 +143,7 @@ test("multi-word selection keeps pronunciation controls hidden", async ({ contex
   await expect(page.locator(".wordwise-pronunciation")).toBeHidden();
 });
 
-test("predictions keeps UK/US IPA offline when Kaikki is unavailable", async ({ context, page }) => {
+test("predictions resolves both IPA chips from the packaged extended tier when Kaikki is unavailable", async ({ context, page }) => {
   await mockGoogleTranslation(context, "预测");
   await context.route("https://kaikki.org/dictionary/English/meaning/**", (route) =>
     route.fulfill({ status: 503, body: "" }),
@@ -151,10 +151,15 @@ test("predictions keeps UK/US IPA offline when Kaikki is unavailable", async ({ 
   await serveTestPage(context, page, '<p>The model emits several <span id="target">predictions</span>.</p>');
   await selectElementText(page, "#target");
   await expect(page.locator(".wordwise-pronunciation")).toBeVisible();
-  await expect(page.locator(".wordwise-pronunciation")).not.toContainText("No IPA", { timeout: 4_000 });
+  await expect(page.getByLabel("播放英式发音")).toBeEnabled({ timeout: 4_000 });
+  await expect(page.getByLabel("播放美式发音")).toBeEnabled({ timeout: 4_000 });
+  const ipas = page.locator(".wordwise-pronunciation-ipa");
+  await expect(ipas.nth(0)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+  await expect(ipas.nth(1)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+  await expect(ipas.nth(1)).toContainText("/pɹɪdˈɪkʃənz/");
 });
 
-test("Measuring keeps exact audio but fills the missing IPA", async ({ context, page }) => {
+test("Measuring keeps exact human audio while displaying the local US IPA", async ({ context, page }) => {
   await mockGoogleTranslation(context, "测量");
   await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route) => {
     const url = route.request().url();
@@ -174,6 +179,8 @@ test("Measuring keeps exact audio but fills the missing IPA", async ({ context, 
   await serveTestPage(context, page, '<p><span id="target">Measuring</span> token prediction differences is useful.</p>');
   await selectElementText(page, "#target");
   await expect(page.locator(".wordwise-pronunciation")).toBeVisible();
-  await expect(page.locator(".wordwise-pronunciation")).not.toContainText("Audio only", { timeout: 4_000 });
-  await expect(page.locator(".wordwise-pronunciation")).not.toContainText("No IPA");
+  await expect(page.getByLabel("播放美式发音")).toBeEnabled({ timeout: 4_000 });
+  const ipas = page.locator(".wordwise-pronunciation-ipa");
+  await expect(ipas.nth(0)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+  await expect(ipas.nth(1)).toHaveText("/mˈɛʒɚɪŋ/");
 });
