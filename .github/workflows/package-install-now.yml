@@ -28,6 +28,9 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
+      - name: Prepare lexicon
+        run: npm run prepare:lexicon
+
       - name: Typecheck
         run: npm run typecheck
 
