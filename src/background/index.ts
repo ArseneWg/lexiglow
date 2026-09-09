@@ -389,7 +389,6 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
       lemma,
       surface,
       partOfSpeech,
-      wordFormLabel: describeEnglishWordForm(surface, lemma, partOfSpeech),
       rank,
       ...flags,
       isIgnored: false,
