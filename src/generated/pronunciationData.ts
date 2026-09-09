@@ -8652,6 +8652,9 @@ export const LOCAL_US_ARPABET = {
   "measures": [
     "M EH1 ZH ER0 Z"
   ],
+  "measuring": [
+    "M EH1 ZH ER0 IH0 NG"
+  ],
   "meat": [
     "M IY1 T"
   ],
@@ -23530,6 +23533,9 @@ export const LOCAL_UK_IPA = {
   ],
   "measures": [
     "/mˈɛʒəz/"
+  ],
+  "measuring": [
+    "/mˈɛʒəɹɪŋ/"
   ],
   "meat": [
     "/mˈiːt/"

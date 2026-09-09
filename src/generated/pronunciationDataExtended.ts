@@ -8120,9 +8120,6 @@ export const EXTENDED_LOCAL_US_ARPABET = {
   "meanwhile": [
     "M IY1 N W AY2 L"
   ],
-  "measuring": [
-    "M EH1 ZH ER0 IH0 NG"
-  ],
   "mechanics": [
     "M AH0 K AE1 N IH0 K S"
   ],
@@ -22028,9 +22025,6 @@ export const EXTENDED_LOCAL_UK_IPA = {
   ],
   "meanwhile": [
     "/mˈiːnwˌaɪl/"
-  ],
-  "measuring": [
-    "/mˈɛʒəɹɪŋ/"
   ],
   "mechanics": [
     "/mɪkˈænɪks/"
