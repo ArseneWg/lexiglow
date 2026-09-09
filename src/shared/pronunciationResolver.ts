@@ -324,10 +324,20 @@ function chooseVariant(variants: readonly PronunciationVariant[], accent: Pronun
     .sort((left, right) => scoreVariant(right, accent, partOfSpeech) - scoreVariant(left, accent, partOfSpeech))[0];
 }
 
+function chooseDisplayVariant(
+  variants: readonly PronunciationVariant[],
+  accent: PronunciationAccent,
+  partOfSpeech?: string,
+): PronunciationVariant | undefined {
+  const accentVariants = variants.filter((variant) => variant.accent === accent);
+  const ipaVariants = accentVariants.filter((variant) => Boolean(variant.ipa));
+  return chooseVariant(ipaVariants.length ? ipaVariants : accentVariants, accent, partOfSpeech);
+}
+
 function selectVariantIds(variants: readonly PronunciationVariant[], partOfSpeech?: string): Partial<Record<PronunciationAccent, string>> {
   const selected: Partial<Record<PronunciationAccent, string>> = {};
-  const uk = chooseVariant(variants, "en-GB", partOfSpeech);
-  const us = chooseVariant(variants, "en-US", partOfSpeech);
+  const uk = chooseDisplayVariant(variants, "en-GB", partOfSpeech);
+  const us = chooseDisplayVariant(variants, "en-US", partOfSpeech);
   if (uk) selected["en-GB"] = uk.id;
   if (us) selected["en-US"] = us.id;
   return selected;
