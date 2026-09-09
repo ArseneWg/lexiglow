@@ -2,6 +2,10 @@ import { t } from "./i18n";
 import { lookupRank, resolveLookupLemma } from "./lexicon";
 import { countTotalKnown, estimateLearnerLevel, resolveWordFlags } from "./settings";
 import { createEnglishTokenMatcher } from "./word";
+import {
+  formatStructuredSensesForPrompt,
+  lookupStructuredLexicalSenses,
+} from "./lexicalSense";
 import type {
   EnglishExplanationResult,
   LearnerLevelBand,
@@ -148,9 +152,14 @@ function buildWordTranslationSystemPrompt(
 ): string {
   const meaningLanguage = buildMeaningPromptFragment(settings.learnerLanguageCode);
 
+  const senseInstruction =
+    "Use the dictionary_senses supplied in the user message as anchors when they fit the sentence, but do not force a listed sense when the context clearly uses a newer technical or domain-specific meaning. " +
+    "Choose one exact contextual meaning. Return a short semantic hint describing the usage domain or object type, and at most three other common meanings that are genuinely distinct and useful to a learner. Exclude obscure, obsolete, or duplicate senses. ";
+
   if (mode === "english") {
     return (
       `${buildLearnerLevelInstruction(learnerLevel, knownCount)} ` +
+      senseInstruction +
       "Translate the target English word or short phrase based on the sentence context. " +
       `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
       `First identify the exact meaning in ${meaningLanguage}. ` +
@@ -158,24 +167,26 @@ function buildWordTranslationSystemPrompt(
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
       "Use simple, common English. Avoid advanced synonyms, long clauses, and dictionary jargon. " +
       "Avoid using the target word or its inflections in the explanation unless absolutely necessary. " +
-      'Return strict JSON only: {"word":"<precise meaning in the learner language>","english":"<one short easy English sentence>","pos":"<single best part of speech in context>"}. No markdown or extra text.'
+      'Return strict JSON only: {"word":"<precise meaning in the learner language>","english":"<one short easy English sentence>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in the learner language>","alternatives":[{"meaning":"<other common meaning in learner language>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown or extra text.'
     );
   }
 
   if (mode === "sentence") {
     return (
+      senseInstruction +
       "Translate the target English word or short phrase based on the sentence context. " +
       `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
-      `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","sentence":"<full sentence translation in ${meaningLanguage}>","pos":"<single best part of speech in context>"}. No markdown, no explanation.`
+      `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","sentence":"<full sentence translation in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>","alternatives":[{"meaning":"<other common meaning in ${meaningLanguage}>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown, no explanation.`
     );
   }
 
   return (
+    senseInstruction +
     "Translate the target English word or short phrase based on the sentence context. " +
     `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
     "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
-    `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","pos":"<single best part of speech in context>"}. No markdown or extra text.`
+    `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>","alternatives":[{"meaning":"<other common meaning in ${meaningLanguage}>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown or extra text.`
   );
 }
 
@@ -793,6 +804,8 @@ export function parseLlmTranslationResponse(payload: string): {
   sentenceTranslation?: string;
   englishExplanation?: string;
   contextualPartOfSpeech?: string;
+  semanticHint?: string;
+  alternativeMeanings?: Array<{ meaning: string; semanticHint?: string; partOfSpeech?: string }>;
 } {
   const content = stripCodeFence(payload);
   const jsonStart = content.indexOf("{");
@@ -805,6 +818,8 @@ export function parseLlmTranslationResponse(payload: string): {
         sentence?: unknown;
         english?: unknown;
         pos?: unknown;
+        hint?: unknown;
+        alternatives?: unknown;
       };
       const translation = cleanModelOutput(typeof parsed.word === "string" ? parsed.word : "");
       const sentenceTranslation = cleanModelOutput(
@@ -816,6 +831,22 @@ export function parseLlmTranslationResponse(payload: string): {
       const contextualPartOfSpeech = normalizeContextualPartOfSpeech(
         typeof parsed.pos === "string" ? parsed.pos : "",
       );
+      const semanticHint = cleanModelOutput(typeof parsed.hint === "string" ? parsed.hint : "");
+      const alternativeMeanings = Array.isArray(parsed.alternatives)
+        ? parsed.alternatives.flatMap((item) => {
+            if (!item || typeof item !== "object") return [];
+            const object = item as { meaning?: unknown; hint?: unknown; pos?: unknown };
+            const meaning = cleanModelOutput(typeof object.meaning === "string" ? object.meaning : "");
+            if (!meaning || meaning === translation) return [];
+            const hint = cleanModelOutput(typeof object.hint === "string" ? object.hint : "");
+            const pos = normalizeContextualPartOfSpeech(typeof object.pos === "string" ? object.pos : "");
+            return [{
+              meaning,
+              semanticHint: hint || undefined,
+              partOfSpeech: pos,
+            }];
+          }).slice(0, 3)
+        : [];
 
       if (translation) {
         return {
@@ -823,6 +854,8 @@ export function parseLlmTranslationResponse(payload: string): {
           sentenceTranslation: sentenceTranslation || undefined,
           englishExplanation: englishExplanation || undefined,
           contextualPartOfSpeech,
+          semanticHint: semanticHint || undefined,
+          alternativeMeanings: alternativeMeanings.length ? alternativeMeanings : undefined,
         };
       }
     } catch {
@@ -1452,6 +1485,11 @@ export async function translateWithLlm({
   }
 
   const sentence = trimContext(contextText || surface);
+  const structuredLexicon = await lookupStructuredLexicalSenses(surface, {
+    contextText: sentence,
+    learnerLanguageCode: settings.learnerLanguageCode,
+  }).catch(() => ({ surface, lemma: resolveLookupLemma(surface), wordFormLabel: undefined, senses: [] }));
+  const dictionarySenses = formatStructuredSensesForPrompt(structuredLexicon);
   const mode = responseMode ?? settings.llmDisplayMode;
   const needsSentence = mode === "sentence";
   const needsEnglishExplanation = mode === "english";
@@ -1463,9 +1501,9 @@ export async function translateWithLlm({
     ({ content } = await requestLlmText({
       settings,
       systemPrompt: buildWordTranslationSystemPrompt(settings, learnerLevel, knownCount, mode),
-      userPrompt: `word: ${surface}\nsentence: ${sentence}`,
+      userPrompt: `word: ${surface}\nlemma: ${structuredLexicon.lemma || resolveLookupLemma(surface)}\nword_form: ${structuredLexicon.wordFormLabel || "canonical"}\nsentence: ${sentence}\ndictionary_senses:\n${dictionarySenses}`,
       temperature: 0,
-      maxTokens: needsEnglishExplanation ? 140 : needsSentence ? 96 : 40,
+      maxTokens: needsEnglishExplanation ? 240 : needsSentence ? 220 : 180,
       timeoutMs: WORD_TRANSLATION_REQUEST_TIMEOUT_MS,
       preferJson: true,
     }));
@@ -1517,6 +1555,10 @@ export async function translateWithLlm({
     sentenceTranslation: parsed.sentenceTranslation,
     englishExplanation: parsed.englishExplanation,
     contextualPartOfSpeech: parsed.contextualPartOfSpeech,
+    lexicalLemma: structuredLexicon.lemma || undefined,
+    wordFormLabel: structuredLexicon.wordFormLabel,
+    semanticHint: parsed.semanticHint,
+    alternativeMeanings: parsed.alternativeMeanings,
     provider: getLlmProviderTag(),
     cached: false,
   };

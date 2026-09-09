@@ -81,6 +81,22 @@ describe("pronunciation resolver v2", () => {
     expect(derived.every((item) => !item.audio)).toBe(true);
   });
 
+  test("completes a missing accent from the lemma even when another accent is exact", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/florps.jsonl")) {
+        return { ok: true, text: async () => JSON.stringify({ word: "florps", sounds: [{ tags: ["US"], ipa: "/flɔrps/" }] }) };
+      }
+      if (url.endsWith("/florp.jsonl")) {
+        return { ok: true, text: async () => JSON.stringify({ word: "florp", sounds: [{ tags: ["UK"], ipa: "/flɔːp/" }] }) };
+      }
+      return { ok: false, text: async () => "" };
+    });
+    const result = await resolvePronunciation("florps", { fetchFn: fetchMock as never });
+    expect(result.usPhonetic).toBe("/flɔrps/");
+    expect(result.ukPhonetic).toBe("/flɔːps/");
+  });
+
   test("does not relabel generic or Canadian pronunciation as US or UK", async () => {
     const generic = extractKaikkiPronunciationVariants(
       JSON.stringify({ word: "foobar", sounds: [{ tags: ["Canada"], ipa: "/ˈfuːbɑr/" }] }),

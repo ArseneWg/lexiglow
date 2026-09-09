@@ -356,6 +356,62 @@ const TOOLTIP_STYLE = `
   .wordwise-primary-translation-pos[data-visible="true"] {
     display: inline-flex;
   }
+  .wordwise-lexical-details {
+    display: none;
+    margin-top: 7px;
+    gap: 6px;
+    color: #64748b;
+  }
+  .wordwise-lexical-details[data-visible="true"] {
+    display: grid;
+  }
+  .wordwise-word-form {
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: #8a7a61;
+    font-weight: 600;
+    letter-spacing: 0.015em;
+  }
+  .wordwise-semantic-hint {
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #64748b;
+  }
+  .wordwise-other-meanings {
+    display: none;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #526071;
+  }
+  .wordwise-other-meanings[data-visible="true"] {
+    display: block;
+  }
+  .wordwise-other-meanings summary {
+    cursor: pointer;
+    color: #758195;
+    font-weight: 600;
+    user-select: none;
+  }
+  .wordwise-other-meanings-list {
+    list-style: none;
+    padding: 5px 0 0;
+    margin: 0;
+    display: grid;
+    gap: 4px;
+  }
+  .wordwise-other-meanings-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .wordwise-other-meaning-text {
+    color: #3f4f62;
+    font-weight: 600;
+  }
+  .wordwise-other-meaning-hint {
+    color: #8a96a6;
+  }
   .wordwise-translation[data-compact="true"] .wordwise-primary-translation {
     font-size: 15.25px;
     line-height: 1.44;
@@ -2259,6 +2315,23 @@ function createTooltipRoot() {
   primaryTranslationPosEl.dataset.visible = "false";
   primaryTranslationEl.append(primaryTranslationTextEl, primaryTranslationPosEl);
 
+  const lexicalDetailsEl = document.createElement("div");
+  lexicalDetailsEl.className = "wordwise-lexical-details";
+  lexicalDetailsEl.dataset.visible = "false";
+  const wordFormEl = document.createElement("div");
+  wordFormEl.className = "wordwise-word-form";
+  const semanticHintEl = document.createElement("div");
+  semanticHintEl.className = "wordwise-semantic-hint";
+  const otherMeaningsEl = document.createElement("details");
+  otherMeaningsEl.className = "wordwise-other-meanings";
+  otherMeaningsEl.dataset.visible = "false";
+  const otherMeaningsSummaryEl = document.createElement("summary");
+  otherMeaningsSummaryEl.textContent = ui("tooltipOtherMeanings");
+  const otherMeaningsListEl = document.createElement("ul");
+  otherMeaningsListEl.className = "wordwise-other-meanings-list";
+  otherMeaningsEl.append(otherMeaningsSummaryEl, otherMeaningsListEl);
+  lexicalDetailsEl.append(wordFormEl, semanticHintEl, otherMeaningsEl);
+
   const secondaryTranslationEl = document.createElement("div");
   secondaryTranslationEl.className = "wordwise-secondary-translation";
   secondaryTranslationEl.dataset.visible = "false";
@@ -2389,6 +2462,7 @@ function createTooltipRoot() {
 
   translationEl.append(
     primaryTranslationEl,
+    lexicalDetailsEl,
     secondaryTranslationEl,
     englishExplanationEl,
     metaEl,
@@ -2429,6 +2503,12 @@ function createTooltipRoot() {
     primaryTranslationEl,
     primaryTranslationTextEl,
     primaryTranslationPosEl,
+    lexicalDetailsEl,
+    wordFormEl,
+    semanticHintEl,
+    otherMeaningsEl,
+    otherMeaningsSummaryEl,
+    otherMeaningsListEl,
     secondaryTranslationEl,
     englishExplanationEl,
     englishExplanationLabelEl,
@@ -2840,6 +2920,7 @@ function applyTooltipLocale() {
   tooltip.button.textContent = ui("tooltipKnown");
   tooltip.button.title = ui("tooltipKnownTitle");
   tooltip.englishExplanationLabelEl.textContent = ui("tooltipEnglishExplanation");
+  tooltip.otherMeaningsSummaryEl.textContent = ui("tooltipOtherMeanings");
   tooltip.analysisTitleEl.textContent = ui("tooltipSentenceAnalysis");
   tooltip.analysisTriggerButton.textContent = ui("tooltipStartAnalysis");
   tooltip.analysisLoadingTitleEl.textContent = ui("tooltipAnalyzingSentence");
@@ -2926,6 +3007,7 @@ function hideTooltip() {
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
   activePronunciationResult = null;
+  resetLexicalMeaningDisplay();
   tooltipSession = HIDDEN_TOOLTIP_SESSION;
   activeDisplayedTranslationProvider = currentDefaultTranslationProvider;
   if (!preserveAnalysisContext) {
@@ -2943,6 +3025,47 @@ function cancelActiveAsyncRequests() {
 function resetEnglishExplanationDisplay() {
   tooltip.englishExplanationEl.dataset.visible = "false";
   tooltip.englishExplanationTextEl.textContent = "";
+}
+
+function resetLexicalMeaningDisplay() {
+  tooltip.lexicalDetailsEl.dataset.visible = "false";
+  tooltip.wordFormEl.textContent = "";
+  tooltip.semanticHintEl.textContent = "";
+  tooltip.otherMeaningsEl.dataset.visible = "false";
+  tooltip.otherMeaningsEl.open = false;
+  tooltip.otherMeaningsListEl.replaceChildren();
+}
+
+function renderLexicalMeaningDisplay(result?: Pick<LexiconLookupResult,
+  "lemma" | "lexicalLemma" | "wordFormLabel" | "semanticHint" | "alternativeMeanings"
+>) {
+  resetLexicalMeaningDisplay();
+  if (!result) return;
+  const displayedLemma = result.lexicalLemma || result.lemma;
+  const form = result.wordFormLabel && displayedLemma
+    ? displayedLemma + " · " + result.wordFormLabel
+    : "";
+  tooltip.wordFormEl.textContent = form;
+  tooltip.semanticHintEl.textContent = result.semanticHint || "";
+
+  const alternatives = result.alternativeMeanings || [];
+  for (const item of alternatives.slice(0, 3)) {
+    const li = document.createElement("li");
+    const meaning = document.createElement("span");
+    meaning.className = "wordwise-other-meaning-text";
+    meaning.textContent = item.meaning;
+    li.append(meaning);
+    const detail = [item.partOfSpeech, item.semanticHint].filter(Boolean).join(" · ");
+    if (detail) {
+      const hint = document.createElement("span");
+      hint.className = "wordwise-other-meaning-hint";
+      hint.textContent = detail;
+      li.append(hint);
+    }
+    tooltip.otherMeaningsListEl.append(li);
+  }
+  tooltip.otherMeaningsEl.dataset.visible = alternatives.length ? "true" : "false";
+  tooltip.lexicalDetailsEl.dataset.visible = form || result.semanticHint || alternatives.length ? "true" : "false";
 }
 
 function isLlmTranslationProvider(provider?: string) {
@@ -3282,6 +3405,12 @@ function renderSelectionTooltip(
     translation?: string;
     sentenceTranslation?: string;
     translationProvider?: string;
+    contextualPartOfSpeech?: string;
+    lemma?: string;
+    lexicalLemma?: string;
+    wordFormLabel?: string;
+    semanticHint?: string;
+    alternativeMeanings?: LexiconLookupResult["alternativeMeanings"];
   },
 ) {
   const displayedProvider = result?.translationProvider
@@ -3295,7 +3424,22 @@ function renderSelectionTooltip(
   tooltip.surfaceEl.textContent = "";
   tooltip.surfacePosEl.textContent = "";
   tooltip.surfacePosEl.dataset.visible = "false";
-  setPrimaryTranslationContent(result?.translation, undefined, result?.translationProvider);
+  setPrimaryTranslationContent(
+    result?.translation,
+    result?.contextualPartOfSpeech,
+    result?.translationProvider,
+  );
+  if (isSingleEnglishWord(context.text)) {
+    renderLexicalMeaningDisplay({
+      lemma: result?.lemma || normalizeSingleEnglishWord(context.text),
+      lexicalLemma: result?.lexicalLemma,
+      wordFormLabel: result?.wordFormLabel,
+      semanticHint: result?.semanticHint,
+      alternativeMeanings: result?.alternativeMeanings,
+    });
+  } else {
+    resetLexicalMeaningDisplay();
+  }
   tooltip.secondaryTranslationEl.textContent = result?.sentenceTranslation ?? "";
   tooltip.secondaryTranslationEl.dataset.visible = result?.sentenceTranslation ? "true" : "false";
   resetEnglishExplanationDisplay();
@@ -3419,6 +3563,7 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
     result.contextualPartOfSpeech,
     result.translationProvider,
   );
+  renderLexicalMeaningDisplay(result);
   tooltip.secondaryTranslationEl.textContent = result.sentenceTranslation ?? "";
   tooltip.secondaryTranslationEl.dataset.visible = result.sentenceTranslation ? "true" : "false";
   resetEnglishExplanationDisplay();
@@ -3675,9 +3820,7 @@ async function requestSelectionTranslation(
   provider: TranslationProviderChoice,
   context = activeSelectionTooltipContext,
 ) {
-  if (!context) {
-    return;
-  }
+  if (!context) return;
 
   activeSelectionTooltipContext = context;
   setDisplayedTranslationProvider(provider);
@@ -3692,32 +3835,62 @@ async function requestSelectionTranslation(
   tooltip.hintEl.dataset.loading = "true";
   tooltip.hintEl.dataset.kind = "status";
   tooltip.hintEl.textContent = provider === "llm" ? ui("tooltipContextTranslating") : ui("tooltipGoogleTranslating");
+  if (!preservingPreviousResult) resetEnglishExplanationDisplay();
 
-  if (!preservingPreviousResult) {
-    resetEnglishExplanationDisplay();
-  }
-
-  let response: SelectionTranslationResponse;
+  let result: {
+    translation?: string;
+    sentenceTranslation?: string;
+    translationProvider?: string;
+    contextualPartOfSpeech?: string;
+    lemma?: string;
+    lexicalLemma?: string;
+    wordFormLabel?: string;
+    semanticHint?: string;
+    alternativeMeanings?: LexiconLookupResult["alternativeMeanings"];
+  } | null = null;
 
   try {
-    response = await runtimeSend<SelectionTranslationResponse>({
-      type: "TRANSLATE_SELECTION",
-      payload: {
-        text: context.text,
-        contextText: context.contextText,
-        provider,
-      },
-    });
+    if (isSingleEnglishWord(context.text)) {
+      const surface = normalizeSingleEnglishWord(context.text) || context.text;
+      const response = await runtimeSend<LookupWordResponse>({
+        type: "TRANSLATE_WORD",
+        payload: { surface, contextText: context.contextText, forceTranslate: true, provider },
+      });
+      if (response.ok && response.result) {
+        result = {
+          translation: response.result.translation,
+          sentenceTranslation: response.result.sentenceTranslation,
+          translationProvider: response.result.translationProvider,
+          contextualPartOfSpeech: response.result.contextualPartOfSpeech,
+          lemma: response.result.lemma,
+          lexicalLemma: response.result.lexicalLemma,
+          wordFormLabel: response.result.wordFormLabel,
+          semanticHint: response.result.semanticHint,
+          alternativeMeanings: response.result.alternativeMeanings,
+        };
+      }
+    } else {
+      const response = await runtimeSend<SelectionTranslationResponse>({
+        type: "TRANSLATE_SELECTION",
+        payload: { text: context.text, contextText: context.contextText, provider },
+      });
+      if (response.ok && response.result) {
+        result = {
+          translation: response.result.translation,
+          sentenceTranslation: response.result.sentenceTranslation,
+          translationProvider: response.result.translationProvider,
+        };
+      }
+    }
   } catch (error) {
     if (isExtensionContextInvalidated(error)) {
       hideTooltip();
       return;
     }
-
     throw error;
   }
 
-  if (!response.ok || !response.result) {
+  if (!result?.translation) {
     if (translationRequestId === activeSelectionTranslationRequestId) {
       tooltip.translationEl.dataset.transition = "idle";
       tooltip.hintEl.dataset.loading = "false";
@@ -3731,17 +3904,10 @@ async function requestSelectionTranslation(
     translationRequestId !== activeSelectionTranslationRequestId ||
     !activeSelectionTooltipContext ||
     activeSelectionTooltipContext.requestId !== context.requestId
-  ) {
-    return;
-  }
+  ) return;
 
-  const result = response.result;
   await animateTranslationSwap(() => {
-    renderSelectionTooltip(context, {
-      translation: result.translation,
-      sentenceTranslation: result.sentenceTranslation,
-      translationProvider: result.translationProvider,
-    });
+    renderSelectionTooltip(context, result || undefined);
   });
 }
 

@@ -58,6 +58,23 @@ test("single-word selection shows raw UK/US IPA", async ({ context, page }) => {
   await expect(page.locator(".wordwise-pronunciation")).not.toContainText("keiʃən");
 });
 
+test("partial exact pronunciation fills the missing accent from the lemma", async ({ context, page }) => {
+  await mockGoogleTranslation(context, "崩塌");
+  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route) => {
+    const url = route.request().url();
+    const body = url.endsWith("/collapses.jsonl")
+      ? JSON.stringify({ word: "collapses", sounds: [{ tags: ["US"], ipa: "/kəˈlæpsɪz/" }] })
+      : url.endsWith("/collapse.jsonl")
+        ? JSON.stringify({ word: "collapse", sounds: [{ tags: ["UK"], ipa: "/kəˈlæps/" }] })
+        : "";
+    await route.fulfill({ status: body ? 200 : 404, contentType: "application/jsonl", body });
+  });
+  await serveTestPage(context, page, '<p>The bridge <span id="target">collapses</span> suddenly.</p>');
+  await selectElementText(page, "#target");
+  await expect(page.locator(".wordwise-pronunciation")).toContainText("/kəˈlæpsɪz/");
+  await expect(page.locator(".wordwise-pronunciation")).not.toContainText("No IPA");
+});
+
 test("dictionary human audio is played before Chrome TTS", async ({ context, page, extensionWorker }) => {
   await mockGoogleTranslation(context, "混淆");
   await routePronunciation(context, "obfuscation", true);

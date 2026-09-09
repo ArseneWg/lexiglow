@@ -1166,6 +1166,20 @@ export function hasEnglishVoice(voices: TtsVoiceLike[]): boolean {
   return voices.some(isEnglishVoice);
 }
 
+export type TtsPlaybackEventOutcome = "pending" | "success" | "failure";
+
+export function classifyTtsPlaybackEvent(
+  eventType: string,
+  started: boolean,
+): TtsPlaybackEventOutcome {
+  if (eventType === "end") return "success";
+  if (eventType === "error") return "failure";
+  if (eventType === "interrupted" || eventType === "cancelled") {
+    return started ? "success" : "failure";
+  }
+  return "pending";
+}
+
 export function selectVoiceForAccent(
   voices: TtsVoiceLike[],
   accent: PronunciationAccent,

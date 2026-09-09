@@ -447,14 +447,38 @@ export async function resolvePronunciation(
   }
 
   const exact = dedupeVariants([...structured, ...localVariants(normalized)]);
-  if (exact.length) return buildResult(surface, exact, "exact", true, options.partOfSpeech);
+  const selectedExact = selectVariantIds(exact, options.partOfSpeech);
+  const missingAccents = new Set<PronunciationAccent>(
+    (["en-GB", "en-US"] as const).filter((accent) => !selectedExact[accent]),
+  );
 
-  const candidates = getLemmaCandidates(normalized).filter((candidate) => normalizeSurface(candidate) !== normalized).slice(0, 4);
-  for (const base of candidates) {
-    let baseVariants = localVariants(base);
-    if (!baseVariants.length) baseVariants = await lookupKaikkiVariants(base, fetchFn);
-    const derived = deriveInflectedPronunciationVariants(normalized, base, baseVariants);
-    if (derived.length) return buildResult(surface, derived, "derived", true, options.partOfSpeech);
+  const completed = [...exact];
+  if (missingAccents.size) {
+    const candidates = getLemmaCandidates(normalized)
+      .filter((candidate) => normalizeSurface(candidate) !== normalized)
+      .slice(0, 4);
+
+    for (const base of candidates) {
+      let baseVariants = localVariants(base);
+      const locallyCovered = new Set(baseVariants.map((variant) => variant.accent));
+      if ([...missingAccents].some((accent) => !locallyCovered.has(accent))) {
+        baseVariants = dedupeVariants([
+          ...baseVariants,
+          ...(await lookupKaikkiVariants(base, fetchFn)),
+        ]);
+      }
+      const derived = deriveInflectedPronunciationVariants(normalized, base, baseVariants)
+        .filter((variant) => variant.accent !== "en" && missingAccents.has(variant.accent));
+      for (const variant of derived) {
+        completed.push(variant);
+        missingAccents.delete(variant.accent as PronunciationAccent);
+      }
+      if (!missingAccents.size) break;
+    }
+  }
+
+  if (completed.length) {
+    return buildResult(surface, completed, exact.length ? "exact" : "derived", true, options.partOfSpeech);
   }
 
   return buildResult(surface, [], "tts-only", true, options.partOfSpeech);
