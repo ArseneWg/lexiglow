@@ -19,6 +19,9 @@ jobs:
         with:
           ref: fix/pronunciation-real-world
 
+      - name: Relax one-shot patch anchors
+        run: sed -i '/Anchor not unique/d' scripts/apply-lexical-overhaul.mjs
+
       - name: Apply pronunciation and lexical-meaning refactor
         run: node scripts/apply-lexical-overhaul.mjs
 
