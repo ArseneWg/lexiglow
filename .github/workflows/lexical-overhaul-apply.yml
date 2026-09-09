@@ -1,0 +1,36 @@
+name: Apply lexical overhaul
+
+on:
+  push:
+    branches:
+      - fix/pronunciation-real-world
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: fix/pronunciation-real-world
+
+      - name: Apply pronunciation and lexical-meaning refactor
+        run: node scripts/apply-lexical-overhaul.mjs
+
+      - name: Remove one-shot applicator
+        run: |
+          rm scripts/apply-lexical-overhaul.mjs
+          rm .github/workflows/lexical-overhaul-apply.yml
+
+      - name: Commit applied changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Unify pronunciation and contextual word meaning"
+          git push origin HEAD:fix/pronunciation-real-world
