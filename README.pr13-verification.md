@@ -1,3 +1,3 @@
 # PR 13 verification
 
-Temporary marker to trigger normal CI after refreshing the reported `Measuring` pronunciation fallback. Remove before merge.
+Temporary marker to trigger the pronunciation display/audio selection fix. Remove before merge.
