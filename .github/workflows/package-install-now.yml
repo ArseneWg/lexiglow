@@ -1,0 +1,51 @@
+name: Install Package Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    if: github.event.pull_request.head.ref == 'build/install-package-20260909'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Package extension
+        run: npm run release:package
+
+      - name: Upload install package
+        uses: actions/upload-artifact@v4
+        with:
+          name: lexiglow-install-package-${{ github.run_id }}
+          path: |
+            release/lexiglow-0.1.0.zip
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
