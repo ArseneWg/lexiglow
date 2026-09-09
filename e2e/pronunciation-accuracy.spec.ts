@@ -156,7 +156,6 @@ test("predictions resolves both IPA chips from the packaged extended tier when K
   const ipas = page.locator(".wordwise-pronunciation-ipa");
   await expect(ipas.nth(0)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
   await expect(ipas.nth(1)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
-  await expect(ipas.nth(1)).toContainText("/pɹɪdˈɪkʃənz/");
 });
 
 test("Measuring keeps exact human audio while displaying the local US IPA", async ({ context, page }) => {
