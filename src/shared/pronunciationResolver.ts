@@ -241,7 +241,14 @@ function cmuToIpa(pronunciation: string): string | undefined {
 }
 
 type LocalPronunciationMap = Readonly<Record<string, readonly string[]>>;
-let extendedPronunciationDataPromise: Promise<typeof import("../generated/pronunciationDataExtended")> | null = null;
+
+export interface ExtendedPronunciationData {
+  us: LocalPronunciationMap;
+  uk: LocalPronunciationMap;
+}
+
+const EMPTY_EXTENDED_PRONUNCIATION_DATA: ExtendedPronunciationData = { us: {}, uk: {} };
+let extendedPronunciationDataPromise: Promise<ExtendedPronunciationData> | null = null;
 
 function variantsFromLocalMaps(
   surface: string,
@@ -272,26 +279,46 @@ function variantsFromLocalMaps(
   return variants;
 }
 
-async function localVariants(surface: string): Promise<PronunciationVariant[]> {
-  const core = variantsFromLocalMaps(
+function coreLocalVariants(surface: string): PronunciationVariant[] {
+  return variantsFromLocalMaps(
     surface,
     LOCAL_UK_IPA as LocalPronunciationMap,
     LOCAL_US_ARPABET as LocalPronunciationMap,
   );
-  const covered = new Set(core.map((variant) => variant.accent));
-  if (covered.has("en-GB") && covered.has("en-US")) return core;
+}
 
-  extendedPronunciationDataPromise ||= import("../generated/pronunciationDataExtended");
-  const extended = await extendedPronunciationDataPromise;
-  return dedupeVariants([
-    ...core,
-    ...variantsFromLocalMaps(
-      surface,
-      extended.EXTENDED_LOCAL_UK_IPA as LocalPronunciationMap,
-      extended.EXTENDED_LOCAL_US_ARPABET as LocalPronunciationMap,
-      "-extended",
-    ),
-  ]);
+async function loadPackagedExtendedPronunciationData(): Promise<ExtendedPronunciationData> {
+  if (extendedPronunciationDataPromise) return extendedPronunciationDataPromise;
+  const runtimeApi = globalThis.chrome?.runtime;
+  if (!runtimeApi?.getURL || typeof globalThis.fetch !== "function") {
+    return EMPTY_EXTENDED_PRONUNCIATION_DATA;
+  }
+
+  extendedPronunciationDataPromise = (async () => {
+    try {
+      const response = await globalThis.fetch(
+        runtimeApi.getURL("dist/pronunciationDataExtended.json"),
+        { cache: "force-cache" },
+      );
+      if (!response.ok) return EMPTY_EXTENDED_PRONUNCIATION_DATA;
+      const parsed = await response.json() as Partial<ExtendedPronunciationData>;
+      return {
+        us: parsed.us && typeof parsed.us === "object" ? parsed.us : {},
+        uk: parsed.uk && typeof parsed.uk === "object" ? parsed.uk : {},
+      };
+    } catch {
+      return EMPTY_EXTENDED_PRONUNCIATION_DATA;
+    }
+  })();
+  return extendedPronunciationDataPromise;
+}
+
+async function extendedLocalVariants(
+  surface: string,
+  provided?: ExtendedPronunciationData,
+): Promise<PronunciationVariant[]> {
+  const extended = provided ?? await loadPackagedExtendedPronunciationData();
+  return variantsFromLocalMaps(surface, extended.uk, extended.us, "-extended");
 }
 
 function dedupeVariants(variants: readonly PronunciationVariant[]): PronunciationVariant[] {
@@ -472,7 +499,12 @@ export function getPronunciationVariantForAccent(
 
 export async function resolvePronunciation(
   surface: string,
-  options: { contextText?: string; partOfSpeech?: string; fetchFn?: FetchLike } = {},
+  options: {
+    contextText?: string;
+    partOfSpeech?: string;
+    fetchFn?: FetchLike;
+    extendedData?: ExtendedPronunciationData;
+  } = {},
 ): Promise<Omit<PronunciationResult, "cached">> {
   const normalized = normalizeSurface(surface);
   if (!normalized) return buildResult(surface, [], "tts-only", false, options.partOfSpeech);
@@ -488,8 +520,21 @@ export async function resolvePronunciation(
     return buildResult(surface, withAudio, "context-exact", true, options.partOfSpeech);
   }
 
-  const exact = dedupeVariants([...structured, ...(await localVariants(normalized))]);
-  const selectedExact = selectVariantIds(exact, options.partOfSpeech);
+  let exact = dedupeVariants([...structured, ...coreLocalVariants(normalized)]);
+  let selectedExact = selectVariantIds(exact, options.partOfSpeech);
+  const needsExtendedExact = (["en-GB", "en-US"] as const).some((accent) => {
+    const selectedId = selectedExact[accent];
+    const selected = selectedId ? exact.find((variant) => variant.id === selectedId) : undefined;
+    return !selected?.ipa;
+  });
+  if (needsExtendedExact) {
+    exact = dedupeVariants([
+      ...exact,
+      ...(await extendedLocalVariants(normalized, options.extendedData)),
+    ]);
+    selectedExact = selectVariantIds(exact, options.partOfSpeech);
+  }
+
   const missingAccents = new Set<PronunciationAccent>(
     (["en-GB", "en-US"] as const).filter((accent) => {
       const selectedId = selectedExact[accent];
@@ -505,8 +550,19 @@ export async function resolvePronunciation(
       .slice(0, 4);
 
     for (const base of candidates) {
-      let baseVariants = await localVariants(base);
-      const locallyCovered = new Set(baseVariants.map((variant) => variant.accent));
+      let baseVariants = coreLocalVariants(base);
+      let locallyCovered = new Set(
+        baseVariants.filter((variant) => variant.ipa).map((variant) => variant.accent),
+      );
+      if ([...missingAccents].some((accent) => !locallyCovered.has(accent))) {
+        baseVariants = dedupeVariants([
+          ...baseVariants,
+          ...(await extendedLocalVariants(base, options.extendedData)),
+        ]);
+        locallyCovered = new Set(
+          baseVariants.filter((variant) => variant.ipa).map((variant) => variant.accent),
+        );
+      }
       if ([...missingAccents].some((accent) => !locallyCovered.has(accent))) {
         baseVariants = dedupeVariants([
           ...baseVariants,
