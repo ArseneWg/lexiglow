@@ -1,5 +1,5 @@
 import { getLemmaCandidates } from "./normalize";
-import type { SupportedLearnerLanguageCode } from "./types";
+import type { AlternativeMeaning, SupportedLearnerLanguageCode } from "./types";
 
 type FetchLike = (
   input: RequestInfo | URL,
@@ -270,4 +270,49 @@ export function formatStructuredSensesForPrompt(lookup: StructuredLexicalLookup)
     ].filter(Boolean).join("; ");
     return "[" + (index + 1) + "] " + sense.gloss + (extras ? " (" + extras + ")" : "");
   }).join("\n");
+}
+
+function compactGloss(value: string, limit = 118): string | undefined {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) return undefined;
+  return compact.length <= limit ? compact : compact.slice(0, limit - 1).trimEnd() + "…";
+}
+
+export function buildStructuredLexicalMetadata(
+  lookup: StructuredLexicalLookup,
+  primaryTranslation = "",
+): {
+  lexicalLemma?: string;
+  wordFormLabel?: string;
+  contextualPartOfSpeech?: string;
+  semanticHint?: string;
+  alternativeMeanings?: AlternativeMeaning[];
+} {
+  const primarySense = lookup.senses[0];
+  const normalizedPrimary = primaryTranslation.trim().toLocaleLowerCase();
+  const seen = new Set<string>(normalizedPrimary ? [normalizedPrimary] : []);
+  const alternativeMeanings: AlternativeMeaning[] = [];
+
+  for (const sense of lookup.senses) {
+    for (const meaning of sense.targetMeanings || []) {
+      const normalized = meaning.trim().toLocaleLowerCase();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      alternativeMeanings.push({
+        meaning,
+        partOfSpeech: sense.partOfSpeech,
+        semanticHint: compactGloss(sense.gloss, 82),
+      });
+      if (alternativeMeanings.length >= 3) break;
+    }
+    if (alternativeMeanings.length >= 3) break;
+  }
+
+  return {
+    lexicalLemma: lookup.lemma || undefined,
+    wordFormLabel: lookup.wordFormLabel,
+    contextualPartOfSpeech: primarySense?.partOfSpeech,
+    semanticHint: primarySense ? compactGloss(primarySense.gloss) : undefined,
+    alternativeMeanings: alternativeMeanings.length ? alternativeMeanings : undefined,
+  };
 }

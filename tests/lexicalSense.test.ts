@@ -72,3 +72,20 @@ describe("structured lexical sense lookup", () => {
     expect(formatStructuredSensesForPrompt(result)).toContain("learner_translations=倒塌");
   });
 });
+
+test("builds visible metadata for the fast translation path", async () => {
+  const { buildStructuredLexicalMetadata } = await import("../src/shared/lexicalSense");
+  const metadata = buildStructuredLexicalMetadata({
+    surface: "predictions",
+    lemma: "prediction",
+    wordFormLabel: "plural",
+    senses: [
+      { partOfSpeech: "noun", gloss: "A statement about what will happen in the future.", targetMeanings: ["预测", "预言"], source: "kaikki" },
+      { partOfSpeech: "noun", gloss: "A forecast produced by a model.", targetMeanings: ["预测结果"], source: "kaikki" },
+    ],
+  }, "预测");
+  expect(metadata.lexicalLemma).toBe("prediction");
+  expect(metadata.wordFormLabel).toBe("plural");
+  expect(metadata.semanticHint).toContain("statement");
+  expect(metadata.alternativeMeanings?.map((item) => item.meaning)).toEqual(["预言", "预测结果"]);
+});

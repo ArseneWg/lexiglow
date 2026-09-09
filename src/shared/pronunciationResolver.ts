@@ -240,13 +240,21 @@ function cmuToIpa(pronunciation: string): string | undefined {
   return body ? "/" + body + "/" : undefined;
 }
 
-function localVariants(surface: string): PronunciationVariant[] {
+type LocalPronunciationMap = Readonly<Record<string, readonly string[]>>;
+let extendedPronunciationDataPromise: Promise<typeof import("../generated/pronunciationDataExtended")> | null = null;
+
+function variantsFromLocalMaps(
+  surface: string,
+  ukMap: LocalPronunciationMap,
+  usMap: LocalPronunciationMap,
+  idSuffix = "",
+): PronunciationVariant[] {
   const normalized = normalizeSurface(surface);
   const variants: PronunciationVariant[] = [];
-  const uk = (LOCAL_UK_IPA as Readonly<Record<string, readonly string[]>>)[normalized] || [];
-  const us = (LOCAL_US_ARPABET as Readonly<Record<string, readonly string[]>>)[normalized] || [];
+  const uk = ukMap[normalized] || [];
+  const us = usMap[normalized] || [];
   uk.forEach((ipa, index) => variants.push({
-    id: stableVariantId("britfone", normalized, "en-GB", index),
+    id: stableVariantId("britfone" + idSuffix, normalized, "en-GB", index),
     accent: "en-GB",
     ipa: ipa.trim(),
     source: "britfone",
@@ -255,13 +263,35 @@ function localVariants(surface: string): PronunciationVariant[] {
     const ipa = cmuToIpa(arpabet);
     if (!ipa) return;
     variants.push({
-      id: stableVariantId("cmudict", normalized, "en-US", index),
+      id: stableVariantId("cmudict" + idSuffix, normalized, "en-US", index),
       accent: "en-US",
       ipa,
       source: "cmudict",
     });
   });
   return variants;
+}
+
+async function localVariants(surface: string): Promise<PronunciationVariant[]> {
+  const core = variantsFromLocalMaps(
+    surface,
+    LOCAL_UK_IPA as LocalPronunciationMap,
+    LOCAL_US_ARPABET as LocalPronunciationMap,
+  );
+  const covered = new Set(core.map((variant) => variant.accent));
+  if (covered.has("en-GB") && covered.has("en-US")) return core;
+
+  extendedPronunciationDataPromise ||= import("../generated/pronunciationDataExtended");
+  const extended = await extendedPronunciationDataPromise;
+  return dedupeVariants([
+    ...core,
+    ...variantsFromLocalMaps(
+      surface,
+      extended.EXTENDED_LOCAL_UK_IPA as LocalPronunciationMap,
+      extended.EXTENDED_LOCAL_US_ARPABET as LocalPronunciationMap,
+      "-extended",
+    ),
+  ]);
 }
 
 function dedupeVariants(variants: readonly PronunciationVariant[]): PronunciationVariant[] {
@@ -280,9 +310,9 @@ function scoreVariant(variant: PronunciationVariant, accent: PronunciationAccent
   let score = 0;
   if (variant.accent === accent) score += 100;
   else if (variant.accent === "en") score += 10;
-  if (variant.audio?.url && variant.ipa) score += 80;
-  else if (variant.audio?.url) score += 55;
-  else if (variant.ipa) score += 35;
+  if (variant.audio?.url && variant.ipa) score += 90;
+  else if (variant.ipa) score += 65;
+  else if (variant.audio?.url) score += 35;
   if (variant.source === "kaikki") score += 20;
   if (partOfSpeech && normalizePos(variant.partOfSpeech) === normalizePos(partOfSpeech)) score += 25;
   return score;
@@ -404,6 +434,8 @@ function buildResult(surface: string, variants: PronunciationVariant[], confiden
   const selectedVariantIds = confidence === "ambiguous" ? {} : selectVariantIds(deduped, partOfSpeech);
   const uk = selectedVariantIds["en-GB"] ? deduped.find((item) => item.id === selectedVariantIds["en-GB"]) : undefined;
   const us = selectedVariantIds["en-US"] ? deduped.find((item) => item.id === selectedVariantIds["en-US"]) : undefined;
+  const ukAudio = chooseVariant(deduped.filter((item) => item.audio?.url), "en-GB", partOfSpeech);
+  const usAudio = chooseVariant(deduped.filter((item) => item.audio?.url), "en-US", partOfSpeech);
   return {
     surface,
     variants: deduped,
@@ -413,8 +445,8 @@ function buildResult(surface: string, variants: PronunciationVariant[], confiden
     dataRevision: PRONUNCIATION_DATA_REVISION,
     ukPhonetic: uk?.ipa,
     usPhonetic: us?.ipa,
-    ukAudioUrl: uk?.audio?.url,
-    usAudioUrl: us?.audio?.url,
+    ukAudioUrl: uk?.audio?.url ?? ukAudio?.audio?.url,
+    usAudioUrl: us?.audio?.url ?? usAudio?.audio?.url,
   };
 }
 
@@ -446,10 +478,14 @@ export async function resolvePronunciation(
     return buildResult(surface, withAudio, "context-exact", true, options.partOfSpeech);
   }
 
-  const exact = dedupeVariants([...structured, ...localVariants(normalized)]);
+  const exact = dedupeVariants([...structured, ...(await localVariants(normalized))]);
   const selectedExact = selectVariantIds(exact, options.partOfSpeech);
   const missingAccents = new Set<PronunciationAccent>(
-    (["en-GB", "en-US"] as const).filter((accent) => !selectedExact[accent]),
+    (["en-GB", "en-US"] as const).filter((accent) => {
+      const selectedId = selectedExact[accent];
+      const selected = selectedId ? exact.find((variant) => variant.id === selectedId) : undefined;
+      return !selected?.ipa;
+    }),
   );
 
   const completed = [...exact];
@@ -459,7 +495,7 @@ export async function resolvePronunciation(
       .slice(0, 4);
 
     for (const base of candidates) {
-      let baseVariants = localVariants(base);
+      let baseVariants = await localVariants(base);
       const locallyCovered = new Set(baseVariants.map((variant) => variant.accent));
       if ([...missingAccents].some((accent) => !locallyCovered.has(accent))) {
         baseVariants = dedupeVariants([
