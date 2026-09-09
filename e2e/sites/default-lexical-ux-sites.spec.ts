@@ -44,7 +44,7 @@ test.beforeEach(async ({ context, extensionWorker }) => {
   await mockGoogleTranslation(context, "预测");
 });
 
-test("Quesma default Google card visibly enriches predictions and keeps offline IPA", async ({ context, page }) => {
+test("Quesma default Google card visibly enriches predictions and resolves both reported pronunciation cases", async ({ context, page }) => {
   await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route) => {
     const url = route.request().url();
     if (url.endsWith("/predictions.jsonl")) {
@@ -62,15 +62,36 @@ test("Quesma default Google card visibly enriches predictions and keeps offline 
       }) });
       return;
     }
+    if (url.endsWith("/measuring.jsonl")) {
+      await route.fulfill({ status: 200, contentType: "application/jsonl", body: JSON.stringify({
+        word: "measuring", pos: "verb", sounds: [
+          { tags: ["UK"], ipa: "/ˈmɛʒərɪŋ/" },
+          { tags: ["US"], mp3_url: "https://audio.test/measuring-us.wav" },
+        ],
+      }) });
+      return;
+    }
     await route.fulfill({ status: 503, body: "" });
   });
+
   const response = await page.goto("https://quesma.com/blog/qwen38-27b-quantizations-benchmarked/", { waitUntil: "domcontentloaded", timeout: 30_000 });
   expect(response?.status() ?? 200).toBeLessThan(400);
   await page.waitForTimeout(600);
+
   expect(await selectWord(page, "predictions")).toBe(true);
   await expect(page.locator(".wordwise-primary-translation")).toContainText("预测");
   await expect(page.locator(".wordwise-word-form")).toContainText("prediction · plural", { timeout: 5_000 });
-  await expect(page.locator(".wordwise-semantic-hint")).toContainText("statement", { timeout: 5_000 });
+  await expect(page.locator(".wordwise-semantic-hint")).toContainText("machine-learning model", { timeout: 5_000 });
   await expect(page.locator(".wordwise-other-meanings")).toBeVisible();
-  await expect(page.locator(".wordwise-pronunciation")).not.toContainText("No IPA", { timeout: 5_000 });
+  await expect(page.getByLabel("播放英式发音")).toBeEnabled({ timeout: 5_000 });
+  await expect(page.getByLabel("播放美式发音")).toBeEnabled({ timeout: 5_000 });
+  const predictionIpas = page.locator(".wordwise-pronunciation-ipa");
+  await expect(predictionIpas.nth(0)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+  await expect(predictionIpas.nth(1)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+
+  expect(await selectWord(page, "Measuring")).toBe(true);
+  await expect(page.getByLabel("播放美式发音")).toBeEnabled({ timeout: 5_000 });
+  const measuringIpas = page.locator(".wordwise-pronunciation-ipa");
+  await expect(measuringIpas.nth(0)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+  await expect(measuringIpas.nth(1)).toHaveText("/mˈɛʒɚɪŋ/");
 });
