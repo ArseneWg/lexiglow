@@ -154,6 +154,8 @@ test("predictions resolves both IPA chips from the packaged extended tier when K
   await expect(page.getByLabel("播放英式发音")).toBeEnabled({ timeout: 4_000 });
   await expect(page.getByLabel("播放美式发音")).toBeEnabled({ timeout: 4_000 });
   const ipas = page.locator(".wordwise-pronunciation-ipa");
+  // The pinned dictionaries can differ in narrow IPA choices. What matters here is that both
+  // accent slots resolve to real IPA instead of a loading/no-data placeholder.
   await expect(ipas.nth(0)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
   await expect(ipas.nth(1)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
 });
