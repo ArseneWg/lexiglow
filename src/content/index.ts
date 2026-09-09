@@ -3882,7 +3882,7 @@ async function requestTranslation(provider: TranslationProviderChoice) {
   if (normalizeDisplayedTranslationProvider(result.translationProvider) === "google") {
     void loadLexicalMetadata(
       result.surface,
-      requestContext.contextText,
+      requestContext.contextText ?? result.surface,
       result.partOfSpeech,
       result.translation,
     );

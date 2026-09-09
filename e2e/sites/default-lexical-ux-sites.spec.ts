@@ -44,7 +44,7 @@ test.beforeEach(async ({ context, extensionWorker }) => {
   await mockGoogleTranslation(context, "预测");
 });
 
-test("web.dev default Google card visibly enriches predictions and keeps offline IPA", async ({ context, page }) => {
+test("Quesma default Google card visibly enriches predictions and keeps offline IPA", async ({ context, page }) => {
   await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route) => {
     const url = route.request().url();
     if (url.endsWith("/predictions.jsonl")) {
@@ -64,7 +64,7 @@ test("web.dev default Google card visibly enriches predictions and keeps offline
     }
     await route.fulfill({ status: 503, body: "" });
   });
-  const response = await page.goto("https://web.dev/articles/prerender-pages", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  const response = await page.goto("https://quesma.com/blog/qwen38-27b-quantizations-benchmarked/", { waitUntil: "domcontentloaded", timeout: 30_000 });
   expect(response?.status() ?? 200).toBeLessThan(400);
   await page.waitForTimeout(600);
   expect(await selectWord(page, "predictions")).toBe(true);
