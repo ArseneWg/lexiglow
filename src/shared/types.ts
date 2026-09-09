@@ -85,8 +85,38 @@ export interface EnglishExplanationResult {
 }
 
 export type PronunciationAccent = "en-GB" | "en-US";
+export type PronunciationSource = "kaikki" | "cmudict" | "britfone" | "morphology" | "curated";
+export type PronunciationConfidence = "context-exact" | "exact" | "derived" | "ambiguous" | "tts-only";
+export type PronunciationMorphology = "s-ending" | "past-ed" | "progressive-ing";
+
+export interface PronunciationAudioInfo {
+  url: string;
+  audioIpa?: string;
+  sourcePage?: string;
+  author?: string;
+  license?: string;
+  licenseUrl?: string;
+}
+
+export interface PronunciationVariant {
+  id: string;
+  accent: PronunciationAccent | "en";
+  ipa?: string;
+  audio?: PronunciationAudioInfo;
+  partOfSpeech?: string;
+  tags?: string[];
+  source: PronunciationSource;
+  derivedFrom?: string;
+  morphology?: PronunciationMorphology;
+}
 
 export interface PronunciationResult {
+  surface: string;
+  variants: PronunciationVariant[];
+  selectedVariantIds?: Partial<Record<PronunciationAccent, string>>;
+  confidence: PronunciationConfidence;
+  ttsAllowed: boolean;
+  dataRevision: string;
   ukPhonetic?: string;
   usPhonetic?: string;
   ukAudioUrl?: string;
@@ -178,6 +208,12 @@ export interface CacheEntry {
 }
 
 export interface PronunciationCacheEntry {
+  surface: string;
+  variants: PronunciationVariant[];
+  selectedVariantIds?: Partial<Record<PronunciationAccent, string>>;
+  confidence: PronunciationConfidence;
+  ttsAllowed: boolean;
+  dataRevision: string;
   ukPhonetic?: string;
   usPhonetic?: string;
   ukAudioUrl?: string;

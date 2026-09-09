@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "test:e2e:network": "playwright test e2e/network-resilience.spec.ts",
     "release:package": "node scripts/package-release.mjs",
-    "test:e2e:sites": "playwright test --config=playwright.sites.config.ts"
+    "test:e2e:sites": "playwright test --config=playwright.sites.config.ts",
+    "refresh:pronunciation-data": "node scripts/refresh-pronunciation-data.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

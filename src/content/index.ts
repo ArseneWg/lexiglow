@@ -37,6 +37,7 @@ import {
   normalizeSingleEnglishWord,
   validateEnglishSelectionText,
 } from "../shared/word";
+import { getPronunciationVariantForAccent } from "../shared/pronunciationResolver";
 import type {
   LexiconLookupResult,
   PronunciationAccent,
@@ -247,6 +248,10 @@ const TOOLTIP_STYLE = `
   }
   .wordwise-pronunciation-action:hover {
     color: #c2410c;
+  }
+  .wordwise-pronunciation-action:disabled {
+    opacity: 0.42;
+    cursor: wait;
   }
   .wordwise-pronunciation-action[data-playing="true"] {
     color: #dc2626;
@@ -3174,8 +3179,9 @@ function positionSentenceAnalysisPanel(rect: DOMRect) {
   positionTooltip(rect);
 }
 
-function setWordTooltipControls(mode: "word" | "selection") {
+function setWordTooltipControls(mode: "word" | "selection", selectionText = "") {
   const isSelection = mode === "selection";
+  const showSelectionPronunciation = isSelection && isSingleEnglishWord(selectionText);
   const isReviewPrompt = mode === "word" && Boolean(activeContext?.forceTranslate);
   tooltip.card.dataset.layout = mode;
   tooltip.wordView.dataset.layout = mode;
@@ -3185,7 +3191,7 @@ function setWordTooltipControls(mode: "word" | "selection") {
   tooltip.metaEl.style.display = "flex";
   tooltip.rankEl.style.display = isSelection ? "none" : "inline";
   tooltip.llmButton.style.display = "inline-flex";
-  tooltip.pronunciationEl.dataset.visible = isSelection ? "false" : "true";
+  tooltip.pronunciationEl.dataset.visible = !isSelection || showSelectionPronunciation ? "true" : "false";
   tooltip.surfaceHeaderEl.style.display = isSelection ? "none" : "flex";
   tooltip.closeButton.dataset.visible = isSelection || isReviewPrompt ? "true" : "false";
   tooltip.britishButton.dataset.playing = "false";
@@ -3205,11 +3211,13 @@ function formatPronunciationDisplayText(value?: string, audioUrl?: string): stri
 function resetPronunciationDisplay(surface: string) {
   activePronunciationSurface = surface;
   activePronunciationResult = null;
+  tooltip.britishButton.disabled = true;
+  tooltip.americanButton.disabled = true;
   tooltip.britishPhoneticEl.textContent = "/.../";
   tooltip.americanPhoneticEl.textContent = "/.../";
 }
 
-async function loadPronunciation(surface: string) {
+async function loadPronunciation(surface: string, contextText?: string, partOfSpeech?: string) {
   activePronunciationRequestId += 1;
   const requestId = activePronunciationRequestId;
   const normalizedSurface = surface.trim();
@@ -3225,6 +3233,8 @@ async function loadPronunciation(surface: string) {
       type: "LOOKUP_PRONUNCIATION",
       payload: {
         surface: normalizedSurface,
+        contextText,
+        partOfSpeech,
       },
     });
   } catch (error) {
@@ -3239,20 +3249,30 @@ async function loadPronunciation(surface: string) {
   if (
     !response.ok ||
     requestId !== activePronunciationRequestId ||
-    isSelectionTooltipSession(tooltipSession) ||
     activePronunciationSurface !== normalizedSurface
   ) {
     return;
   }
 
   activePronunciationResult = response.result ?? null;
+  const britishVariant = getPronunciationVariantForAccent(activePronunciationResult, "en-GB");
+  const americanVariant = getPronunciationVariantForAccent(activePronunciationResult, "en-US");
+  if (response.result?.confidence === "ambiguous") {
+    tooltip.britishButton.disabled = true;
+    tooltip.americanButton.disabled = true;
+    tooltip.britishPhoneticEl.textContent = "Multiple pronunciations";
+    tooltip.americanPhoneticEl.textContent = "Multiple pronunciations";
+    return;
+  }
+  tooltip.britishButton.disabled = false;
+  tooltip.americanButton.disabled = false;
   tooltip.britishPhoneticEl.textContent = formatPronunciationDisplayText(
-    response.result?.ukPhonetic,
-    response.result?.ukAudioUrl,
+    britishVariant?.ipa ?? response.result?.ukPhonetic,
+    britishVariant?.audio?.url ?? response.result?.ukAudioUrl,
   );
   tooltip.americanPhoneticEl.textContent = formatPronunciationDisplayText(
-    response.result?.usPhonetic,
-    response.result?.usAudioUrl,
+    americanVariant?.ipa ?? response.result?.usPhonetic,
+    americanVariant?.audio?.url ?? response.result?.usAudioUrl,
   );
 }
 
@@ -3270,7 +3290,7 @@ function renderSelectionTooltip(
   tooltip.card.dataset.mode = "word";
   tooltip.wordView.dataset.visible = "true";
   tooltip.analysisView.dataset.visible = "false";
-  setWordTooltipControls("selection");
+  setWordTooltipControls("selection", context.text);
   applySelectionTypography(context);
   tooltip.surfaceEl.textContent = "";
   tooltip.surfacePosEl.textContent = "";
@@ -3296,10 +3316,19 @@ function renderSelectionTooltip(
   activeSelectionContext = context;
   tooltipSession = createTooltipSession("selection");
   setDisplayedTranslationProvider(displayedProvider);
-  activePronunciationRequestId += 1;
-  activePronunciationSurface = "";
   activeContext = null;
   activeResult = null;
+  if (isSingleEnglishWord(context.text)) {
+    const surface = normalizeSingleEnglishWord(context.text) || context.text;
+    if (activePronunciationSurface !== surface) {
+      resetPronunciationDisplay(surface);
+      void loadPronunciation(surface, context.contextText);
+    }
+  } else {
+    activePronunciationRequestId += 1;
+    activePronunciationSurface = "";
+    activePronunciationResult = null;
+  }
   positionTooltip(context.rect);
 }
 
@@ -3422,7 +3451,11 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   activeResult = result;
   if (activePronunciationSurface !== result.surface) {
     resetPronunciationDisplay(result.surface);
-    void loadPronunciation(result.surface);
+    void loadPronunciation(
+      result.surface,
+      activeContext?.contextText,
+      result.contextualPartOfSpeech ?? result.partOfSpeech,
+    );
   }
 }
 
@@ -3775,47 +3808,50 @@ async function playPronunciationAudio(
 }
 
 async function speakPronunciation(accent: PronunciationAccent) {
-  if (!activeResult?.surface || isSelectionTooltipSession(tooltipSession)) {
-    return;
-  }
+  const selectedSurface = activeResult?.surface ?? (
+    activeSelectionTooltipContext && isSingleEnglishWord(activeSelectionTooltipContext.text)
+      ? normalizeSingleEnglishWord(activeSelectionTooltipContext.text)
+      : ""
+  );
+  if (!selectedSurface) return;
 
   const button = accent === "en-GB" ? tooltip.britishButton : tooltip.americanButton;
-  const audioUrl = accent === "en-GB"
+  const variant = getPronunciationVariantForAccent(activePronunciationResult, accent);
+  const audioUrl = variant?.audio?.url ?? (accent === "en-GB"
     ? activePronunciationResult?.ukAudioUrl
-    : activePronunciationResult?.usAudioUrl;
-
-  let response: PronunciationResponse;
+    : activePronunciationResult?.usAudioUrl);
 
   showPronunciationFeedback(button);
 
+  if (audioUrl) {
+    const played = await playPronunciationAudio(audioUrl, button);
+    if (played) return;
+  }
+
+  if (activePronunciationResult?.ttsAllowed === false) {
+    button.dataset.playing = "false";
+    tooltip.hintEl.dataset.visible = "true";
+    tooltip.hintEl.dataset.loading = "false";
+    tooltip.hintEl.textContent = ui("tooltipPronunciationUnavailable");
+    return;
+  }
+
+  let response: PronunciationResponse;
   try {
     response = await runtimeSend<PronunciationResponse>({
       type: "SPEAK_PRONUNCIATION",
-      payload: {
-        text: activeResult.surface,
-        accent,
-      },
+      payload: { text: selectedSurface, accent },
     });
   } catch (error) {
     if (isExtensionContextInvalidated(error)) {
       hideTooltip();
       return;
     }
-
     throw error;
   }
 
   if (!response.ok) {
     button.dataset.playing = "false";
-
-    if (audioUrl) {
-      const played = await playPronunciationAudio(audioUrl, button);
-
-      if (played) {
-        return;
-      }
-    }
-
     tooltip.hintEl.dataset.visible = "true";
     tooltip.hintEl.dataset.loading = "false";
     tooltip.hintEl.textContent = response.error ?? ui("tooltipPronunciationUnavailable");

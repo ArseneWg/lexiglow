@@ -18,3 +18,15 @@ Upstream repository and license:
 
 - https://github.com/first20hours/google-10000-english
 - https://github.com/first20hours/google-10000-english/blob/master/LICENSE.md
+
+## CMU Pronouncing Dictionary (pronunciation data)
+
+LexiGlow ships a generated subset of CMUdict for offline US-English pronunciation fallback. The source is pinned to revision 74790861f652b15e4ac49015a90074ad62a27690. CMUdict permits unrestricted research and commercial use and requests acknowledgement of origin. The generated subset is refreshed with scripts/refresh-pronunciation-data.mjs.
+
+## Britfone (pronunciation data)
+
+LexiGlow ships a generated subset of Britfone for offline Standard Southern British / RP pronunciation fallback. The source is pinned to revision 1062be14adc96c358f2087ac5449d72130c7a6f4 and is distributed under the MIT License. The generated subset is refreshed with scripts/refresh-pronunciation-data.mjs.
+
+## Wiktionary / Wiktextract-derived pronunciation metadata
+
+At runtime LexiGlow may retrieve structured English pronunciation records from Kaikki/Wiktextract-derived data, including IPA, dialect tags, and Wikimedia Commons audio URLs. Audio and entry licensing/attribution can vary by source item; LexiGlow preserves pronunciation variants atomically and does not treat unrelated IPA and audio records as interchangeable.

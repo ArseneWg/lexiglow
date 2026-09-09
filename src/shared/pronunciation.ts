@@ -20,7 +20,12 @@ export interface DictionaryEntryLike {
   phonetics?: DictionaryPhoneticLike[];
 }
 
-type PronunciationData = Omit<PronunciationResult, "cached">;
+type PronunciationData = {
+  ukPhonetic?: string;
+  usPhonetic?: string;
+  ukAudioUrl?: string;
+  usAudioUrl?: string;
+};
 type FetchLike = (
   input: RequestInfo | URL,
   init?: RequestInit,

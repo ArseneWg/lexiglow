@@ -65,9 +65,9 @@ The internal A1-C1 labels are vocabulary-size heuristics used to tune explanatio
 
 In addition to unit tests, the project uses Playwright to launch a real persistent Chromium profile with the MV3 extension loaded. The browser suite exercises the service worker, content script, Shadow DOM tooltip, CSS Highlight API, selections, Popup / Options, dynamic DOM updates, and persisted learning state.
 
-The current suite contains 24 user-facing Chromium scenarios. In addition to the original reading-flow coverage, it now verifies Options backup/download/import, API-key redaction and same-profile secret preservation, LLM 429 and malformed-response fallback, explicit 401 failure UI without fallback, stale hover-response suppression, and prevention of late responses resurrecting a closed tooltip.
+The current suite contains 30 user-facing Chromium scenarios. In addition to the original reading-flow coverage, it now verifies Options backup/download/import, API-key redaction and same-profile secret preservation, LLM 429 and malformed-response fallback, explicit 401 failure UI without fallback, stale hover-response suppression, and prevention of late responses resurrecting a closed tooltip.
 
-The verified CI baseline is 16 Vitest files / 148 unit tests plus 24 / 24 Playwright Chromium extension E2E tests. Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness. Failed E2E runs retain Playwright traces, screenshots, HTML reports, and test-result diagnostics for investigation. A separate non-blocking public-site smoke workflow continues to exercise GitHub, Hacker News, MDN, web.dev, React docs, and Reddit when its CI egress is accepted.
+The verified CI baseline is 17 Vitest files / 158 unit tests plus 30 / 30 Playwright Chromium extension E2E tests. Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness. Failed E2E runs retain Playwright traces, screenshots, HTML reports, and test-result diagnostics for investigation. A separate non-blocking public-site smoke workflow continues to exercise GitHub, Hacker News, MDN, web.dev, React docs, and Reddit when its CI egress is accepted.
 
 ## Long-term data safety and release artifacts
 
@@ -129,3 +129,7 @@ See:
 - [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)
 
 The bundled word-frequency data has separate upstream rights considerations. A commercial LexiGlow license does not automatically grant commercial rights to that third-party data; review `THIRD_PARTY_NOTICES.md` before commercial distribution.
+
+### Pronunciation accuracy pipeline
+
+LexiGlow treats pronunciation as a lexical-reading problem rather than a spelling-only TTS action. Exact single-word selections receive UK/US pronunciation when available. Structured Kaikki/Wiktextract pronunciation variants are kept atomic (IPA, audio/audio-IPA, accent/POS tags), pinned offline CMUdict/Britfone subsets for the top 5,000 frequency words plus explicit edge cases provide bounded reproducible fallback data, common heteronyms are resolved from context/POS when confidence is high, and regular -s/-ed/-ing forms can be derived from the base phonemes without reusing base-word audio. Human lexical audio is played before Chrome TTS; TTS always receives the exact selected surface and is disabled for unresolved ambiguous heteronyms. Source IPA is displayed without destructive DJ-style conversion.

@@ -23,9 +23,9 @@ import type {
 } from "../shared/messages";
 import {
   hasEnglishVoice,
-  lookupBestPronunciation,
   selectVoiceForAccent,
 } from "../shared/pronunciation";
+import { resolvePronunciation } from "../shared/pronunciationResolver";
 import {
   looksLikeContextualSpecialTerm,
   looksLikeSpecialTerm,
@@ -588,56 +588,54 @@ async function handleTranslateSelection(
   }
 }
 
-async function getOrLookupPronunciation(surface: string): Promise<PronunciationResult> {
+async function getOrLookupPronunciation(
+  surface: string,
+  contextText?: string,
+  partOfSpeech?: string,
+): Promise<PronunciationResult> {
   const normalized = surface.trim().toLowerCase();
 
   if (!normalized) {
     return {
+      surface,
+      variants: [],
+      selectedVariantIds: {},
+      confidence: "tts-only",
+      ttsAllowed: false,
+      dataRevision: "empty",
       cached: false,
     };
   }
 
   const translatorSettings = await getTranslatorSettings();
   const cacheTtlMs = getTranslatorCacheTtlMs(translatorSettings);
-  const cached = pronunciationCache.get(normalized);
+  const normalizedContext = (contextText ?? "").trim().toLowerCase().slice(0, 600);
+  const normalizedPos = (partOfSpeech ?? "").trim().toLowerCase();
+  const requestKey = [normalized, normalizedPos, normalizedContext].join("::");
+  const cached = pronunciationCache.get(requestKey);
 
   if (cached) {
-    return {
-      ukPhonetic: cached.ukPhonetic,
-      usPhonetic: cached.usPhonetic,
-      ukAudioUrl: cached.ukAudioUrl,
-      usAudioUrl: cached.usAudioUrl,
-      cached: true,
-    };
+    return { ...cached, cached: true };
   }
 
-  let pending = inFlightPronunciations.get(normalized);
+  let pending = inFlightPronunciations.get(requestKey);
 
   if (!pending) {
     pending = (async () => {
-      const result = await lookupBestPronunciation(normalized);
-
-      pronunciationCache.set(normalized, {
-        ukPhonetic: result.ukPhonetic,
-        usPhonetic: result.usPhonetic,
-        ukAudioUrl: result.ukAudioUrl,
-        usAudioUrl: result.usAudioUrl,
+      const result = await resolvePronunciation(normalized, { contextText, partOfSpeech });
+      pronunciationCache.set(requestKey, {
+        ...result,
         updatedAt: Date.now(),
       }, cacheTtlMs);
-
-      return {
-        ...result,
-        cached: false,
-      };
+      return { ...result, cached: false };
     })();
-
-    inFlightPronunciations.set(normalized, pending);
+    inFlightPronunciations.set(requestKey, pending);
   }
 
   try {
     return await pending;
   } finally {
-    inFlightPronunciations.delete(normalized);
+    inFlightPronunciations.delete(requestKey);
   }
 }
 
@@ -645,7 +643,11 @@ async function getOrLookupPronunciation(surface: string): Promise<PronunciationR
 async function handleLookupPronunciation(
   message: LookupPronunciationMessage,
 ): Promise<PronunciationLookupResponse["result"]> {
-  return getOrLookupPronunciation(message.payload.surface);
+  return getOrLookupPronunciation(
+    message.payload.surface,
+    message.payload.contextText,
+    message.payload.partOfSpeech,
+  );
 }
 
 async function handleSpeakPronunciation(
@@ -701,14 +703,15 @@ async function handleSpeakPronunciation(
           return;
         }
 
-        if (
-          event.type === "start" ||
-          event.type === "end" ||
-          event.type === "interrupted" ||
-          event.type === "cancelled"
-        ) {
+        if (event.type === "end") {
           settled = true;
           resolve();
+          return;
+        }
+
+        if (event.type === "interrupted" || event.type === "cancelled") {
+          settled = true;
+          reject(new Error(ui(learnerLanguageCode, "errorPronunciationPlaybackFailed")));
         }
       },
     });
