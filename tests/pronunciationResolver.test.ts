@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
+import extendedPronunciationData from "../public/pronunciationDataExtended.json";
 import {
   appendInflectionToIpa,
   deriveInflectedPronunciationVariants,
@@ -132,8 +133,11 @@ describe("pronunciation resolver v2", () => {
   });
 });
 
-test("resolves predictions from the lazy extended offline tier when the network is unavailable", async () => {
-  const result = await resolvePronunciation("predictions", { fetchFn: failedFetch() as never });
+test("resolves predictions from the packaged extended offline tier when the network is unavailable", async () => {
+  const result = await resolvePronunciation("predictions", {
+    fetchFn: failedFetch() as never,
+    extendedData: extendedPronunciationData,
+  });
   expect(result.ukPhonetic).toBeTruthy();
   expect(result.usPhonetic).toBeTruthy();
   expect(result.ukPhonetic).not.toBe("No IPA");
@@ -157,6 +161,6 @@ test("uses exact audio while filling an audio-only accent with IPA", async () =>
   });
   const result = await resolvePronunciation("measuring", { partOfSpeech: "verb", fetchFn: fetchMock as never });
   expect(result.ukPhonetic).toBeTruthy();
-  expect(result.usPhonetic).toBeTruthy();
+  expect(result.usPhonetic).toBe("/mˈɛʒɚɪŋ/");
   expect(result.usAudioUrl).toBe("https://audio.test/measuring-us.mp3");
 });
