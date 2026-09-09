@@ -36,6 +36,8 @@ describe("structured lexical sense lookup", () => {
     });
     expect(result.lemma).toBe("collapse");
     expect(result.wordFormLabel).toBe("3sg");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/collaps.jsonl"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/collapse.jsonl"))).toBe(true);
   });
 
   test("follows form-of metadata to the lemma and ranks contextual senses", async () => {
