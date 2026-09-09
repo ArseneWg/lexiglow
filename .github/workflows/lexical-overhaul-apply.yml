@@ -19,8 +19,15 @@ jobs:
         with:
           ref: fix/pronunciation-real-world
 
-      - name: Relax one-shot patch anchors
-        run: sed -i '/Anchor not unique/d' scripts/apply-lexical-overhaul.mjs
+      - name: Normalize one-shot patch script
+        run: |
+          sed -i '/Anchor not unique/d' scripts/apply-lexical-overhaul.mjs
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/apply-lexical-overhaul.mjs')
+          text = path.read_text()
+          path.write_text(text.replace('${', r'\${'))
+          PY
 
       - name: Apply pronunciation and lexical-meaning refactor
         run: node scripts/apply-lexical-overhaul.mjs
