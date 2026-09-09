@@ -272,6 +272,33 @@ export function formatStructuredSensesForPrompt(lookup: StructuredLexicalLookup)
   }).join("\n");
 }
 
+
+function normalizeLexicalMetadataCacheKeyPart(value: string, limit: number): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+export function buildLexicalMetadataCacheKey({
+  learnerLanguageCode,
+  surface,
+  partOfSpeech,
+  contextText,
+  primaryTranslation,
+}: {
+  learnerLanguageCode: string;
+  surface: string;
+  partOfSpeech?: string;
+  contextText?: string;
+  primaryTranslation?: string;
+}): string {
+  return [
+    learnerLanguageCode,
+    normalizeLexicalMetadataCacheKeyPart(surface, 160).toLowerCase(),
+    normalizeLexicalMetadataCacheKeyPart(partOfSpeech ?? "", 48).toLowerCase(),
+    normalizeLexicalMetadataCacheKeyPart(contextText ?? "", 600),
+    normalizeLexicalMetadataCacheKeyPart(primaryTranslation ?? "", 240).toLowerCase(),
+  ].join("::");
+}
+
 function compactGloss(value: string, limit = 118): string | undefined {
   const compact = value.replace(/\s+/g, " ").trim();
   if (!compact) return undefined;
@@ -289,13 +316,13 @@ export function buildStructuredLexicalMetadata(
   alternativeMeanings?: AlternativeMeaning[];
 } {
   const primarySense = lookup.senses[0];
-  const normalizedPrimary = primaryTranslation.trim().toLocaleLowerCase();
+  const normalizedPrimary = primaryTranslation.trim().toLowerCase();
   const seen = new Set<string>(normalizedPrimary ? [normalizedPrimary] : []);
   const alternativeMeanings: AlternativeMeaning[] = [];
 
   for (const sense of lookup.senses) {
     for (const meaning of sense.targetMeanings || []) {
-      const normalized = meaning.trim().toLocaleLowerCase();
+      const normalized = meaning.trim().toLowerCase();
       if (!normalized || seen.has(normalized)) continue;
       seen.add(normalized);
       alternativeMeanings.push({

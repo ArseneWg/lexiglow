@@ -28,6 +28,7 @@ import {
   selectVoiceForAccent,
 } from "../shared/pronunciation";
 import {
+  buildLexicalMetadataCacheKey,
   buildStructuredLexicalMetadata,
   describeEnglishWordForm,
   lookupStructuredLexicalSenses,
@@ -331,13 +332,15 @@ async function handleLookupLexicalMetadata(message: LookupLexicalMetadataMessage
   const surface = message.payload.surface.trim();
   const contextText = message.payload.contextText?.trim() ?? "";
   const partOfSpeech = message.payload.partOfSpeech?.trim() || undefined;
+  const primaryTranslation = message.payload.primaryTranslation?.trim() ?? "";
   const translatorSettings = await getTranslatorSettings();
-  const cacheKey = [
-    translatorSettings.learnerLanguageCode,
-    surface.toLowerCase(),
-    partOfSpeech || "",
+  const cacheKey = buildLexicalMetadataCacheKey({
+    learnerLanguageCode: translatorSettings.learnerLanguageCode,
+    surface,
+    partOfSpeech,
     contextText,
-  ].join("::");
+    primaryTranslation,
+  });
   const cached = lexicalMetadataCache.get(cacheKey);
   if (cached) return cached;
 
@@ -346,7 +349,7 @@ async function handleLookupLexicalMetadata(message: LookupLexicalMetadataMessage
     partOfSpeech,
     learnerLanguageCode: translatorSettings.learnerLanguageCode,
   });
-  const result = buildStructuredLexicalMetadata(lookup, message.payload.primaryTranslation || "");
+  const result = buildStructuredLexicalMetadata(lookup, primaryTranslation);
   lexicalMetadataCache.set(cacheKey, result, 6 * 60 * 60 * 1000);
   return result;
 }
