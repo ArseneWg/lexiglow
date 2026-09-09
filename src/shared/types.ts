@@ -71,6 +71,8 @@ export interface TranslationResult {
   sentenceTranslation?: string;
   englishExplanation?: string;
   contextualPartOfSpeech?: string;
+  lexicalLemma?: string;
+  wordFormLabel?: string;
   semanticHint?: string;
   alternativeMeanings?: AlternativeMeaning[];
   provider: string;
@@ -184,6 +186,7 @@ export interface SentenceAnalysisCacheEntry {
 
 export interface LexiconLookupResult {
   lemma: string;
+  lexicalLemma?: string;
   surface: string;
   partOfSpeech?: string;
   contextualPartOfSpeech?: string;
@@ -214,6 +217,8 @@ export interface CacheEntry {
   sentenceTranslation?: string;
   englishExplanation?: string;
   contextualPartOfSpeech?: string;
+  lexicalLemma?: string;
+  wordFormLabel?: string;
   semanticHint?: string;
   alternativeMeanings?: AlternativeMeaning[];
   provider: string;

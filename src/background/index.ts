@@ -148,7 +148,7 @@ async function translateByChoice({
   lemma: string;
   surface: string;
   contextText: string;
-  responseMode?: "word" | "sentence";
+  responseMode?: "word" | "sentence" | "english";
   translatorSettings: Awaited<ReturnType<typeof getTranslatorSettings>>;
 }): Promise<TranslationResult> {
   if (provider === "google") {
@@ -184,7 +184,7 @@ async function getOrTranslate(
   surface: string,
   contextText: string,
   provider: TranslationProviderChoice,
-  responseMode: "word" | "sentence",
+  responseMode: "word" | "sentence" | "english",
 ): Promise<TranslationResult> {
   const translatorSettings = await getTranslatorSettings();
   const providerSignature = provider === "llm"
@@ -203,6 +203,8 @@ async function getOrTranslate(
       sentenceTranslation: cached.sentenceTranslation,
       englishExplanation: cached.englishExplanation,
       contextualPartOfSpeech: cached.contextualPartOfSpeech,
+      lexicalLemma: cached.lexicalLemma,
+      wordFormLabel: cached.wordFormLabel,
       semanticHint: cached.semanticHint,
       alternativeMeanings: cached.alternativeMeanings,
       provider: cached.provider,
@@ -231,6 +233,8 @@ async function getOrTranslate(
       sentenceTranslation: result.sentenceTranslation,
       englishExplanation: result.englishExplanation,
       contextualPartOfSpeech: result.contextualPartOfSpeech,
+      lexicalLemma: result.lexicalLemma,
+      wordFormLabel: result.wordFormLabel,
       semanticHint: result.semanticHint,
       alternativeMeanings: result.alternativeMeanings,
       provider: result.provider,
@@ -377,9 +381,8 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
   try {
     const partOfSpeechPromise = lookupDictionaryPartOfSpeech({ lemma, surface });
     const translatorSettings = provider === "llm" ? await getTranslatorSettings() : null;
-    const englishMode = provider === "llm" && translatorSettings?.llmDisplayMode === "english";
-    const translationMode =
-      provider === "llm" && translatorSettings?.llmDisplayMode === "sentence" ? "sentence" : "word";
+    const translationMode: "word" | "sentence" | "english" =
+      provider === "llm" ? (translatorSettings?.llmDisplayMode ?? "word") : "word";
     const partOfSpeech = await partOfSpeechPromise;
 
     return {
@@ -393,42 +396,31 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
       isKnown: false,
       shouldTranslate: true,
       reason: "translate",
-      ...(englishMode
-        ? await (async () => {
-            const explanation = await getOrExplainWordInEnglish(lemma, surface, contextText);
-            return {
-              translation: explanation.meaning,
-              sentenceTranslation: undefined,
-              englishExplanation: explanation.explanation,
-              contextualPartOfSpeech: undefined,
-              translationProvider: explanation.provider,
-              cached: explanation.cached,
-            };
-          })()
-        : await (async () => {
-            const translation = await getOrTranslate(
-              lemma,
-              surface,
-              contextText,
-              provider,
-              translationMode,
-            );
-            return {
-              translation: translation.translation,
-              sentenceTranslation: translation.sentenceTranslation,
-              englishExplanation: translation.englishExplanation,
-              contextualPartOfSpeech: translation.contextualPartOfSpeech,
-              semanticHint: translation.semanticHint,
-              alternativeMeanings: translation.alternativeMeanings,
-              wordFormLabel: describeEnglishWordForm(
-                surface,
-                lemma,
-                translation.contextualPartOfSpeech || partOfSpeech,
-              ),
-              translationProvider: translation.provider,
-              cached: translation.cached,
-            };
-          })()),
+      ...(await (async () => {
+        const translation = await getOrTranslate(
+          lemma,
+          surface,
+          contextText,
+          provider,
+          translationMode,
+        );
+        return {
+          translation: translation.translation,
+          sentenceTranslation: translation.sentenceTranslation,
+          englishExplanation: translation.englishExplanation,
+          contextualPartOfSpeech: translation.contextualPartOfSpeech,
+          lexicalLemma: translation.lexicalLemma,
+          semanticHint: translation.semanticHint,
+          alternativeMeanings: translation.alternativeMeanings,
+          wordFormLabel: translation.wordFormLabel ?? describeEnglishWordForm(
+            surface,
+            translation.lexicalLemma || lemma,
+            translation.contextualPartOfSpeech || partOfSpeech,
+          ),
+          translationProvider: translation.provider,
+          cached: translation.cached,
+        };
+      })()),
     };
   } catch {
     const translatorSettings = await getTranslatorSettings();

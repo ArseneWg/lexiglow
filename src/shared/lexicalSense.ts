@@ -133,14 +133,14 @@ function overlapScore(gloss: string, contextText: string): number {
   return score;
 }
 
-function inferLemma(surface: string, entries: readonly KaikkiEntryLike[]): string {
+function inferFormOfLemma(entries: readonly KaikkiEntryLike[]): string | undefined {
   for (const entry of entries) {
     for (const sense of entry.senses || []) {
       const formOf = sense.form_of?.find((item) => item.word?.trim())?.word?.trim();
       if (formOf) return normalizeSurface(formOf);
     }
   }
-  return getLemmaCandidates(surface).find((candidate) => normalizeSurface(candidate) !== normalizeSurface(surface)) || normalizeSurface(surface);
+  return undefined;
 }
 
 export function describeEnglishWordForm(surface: string, lemma: string, partOfSpeech?: string): string | undefined {
@@ -208,8 +208,27 @@ export async function lookupStructuredLexicalSenses(
   const normalized = normalizeSurface(surface);
   const fetchFn = options.fetchFn || (fetch as unknown as FetchLike);
   const exactEntries = normalized ? await fetchEntries(normalized, fetchFn) : [];
-  const lemma = normalized ? inferLemma(normalized, exactEntries) : normalized;
-  const lemmaEntries = lemma && lemma !== normalized ? await fetchEntries(lemma, fetchFn) : [];
+  let lemma = normalized ? inferFormOfLemma(exactEntries) : normalized;
+  let lemmaEntries: KaikkiEntryLike[] = [];
+
+  if (normalized && !lemma) {
+    const candidates = getLemmaCandidates(normalized)
+      .filter((candidate) => normalizeSurface(candidate) !== normalized)
+      .slice(0, 4);
+    for (const candidate of candidates) {
+      const candidateEntries = await fetchEntries(candidate, fetchFn);
+      if (!candidateEntries.length) continue;
+      lemma = normalizeSurface(candidate);
+      lemmaEntries = candidateEntries;
+      break;
+    }
+  }
+
+  lemma ||= normalized;
+  if (lemma && lemma !== normalized && !lemmaEntries.length) {
+    lemmaEntries = await fetchEntries(lemma, fetchFn);
+  }
+
   const scored = collectSenses(
     [...exactEntries, ...lemmaEntries],
     options.contextText || "",
@@ -228,10 +247,14 @@ export async function lookupStructuredLexicalSenses(
     .slice(0, 5)
     .map(({ score: _score, ...sense }) => sense);
 
+  const lexicalPos = options.partOfSpeech
+    || exactEntries.find((entry) => normalizePos(entry.pos))?.pos
+    || lemmaEntries.find((entry) => normalizePos(entry.pos))?.pos;
+
   return {
     surface,
     lemma: lemma || normalized,
-    wordFormLabel: describeEnglishWordForm(surface, lemma || normalized, options.partOfSpeech),
+    wordFormLabel: describeEnglishWordForm(surface, lemma || normalized, lexicalPos),
     senses,
   };
 }

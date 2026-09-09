@@ -3037,12 +3037,13 @@ function resetLexicalMeaningDisplay() {
 }
 
 function renderLexicalMeaningDisplay(result?: Pick<LexiconLookupResult,
-  "lemma" | "wordFormLabel" | "semanticHint" | "alternativeMeanings"
+  "lemma" | "lexicalLemma" | "wordFormLabel" | "semanticHint" | "alternativeMeanings"
 >) {
   resetLexicalMeaningDisplay();
   if (!result) return;
-  const form = result.wordFormLabel && result.lemma
-    ? result.lemma + " · " + result.wordFormLabel
+  const displayedLemma = result.lexicalLemma || result.lemma;
+  const form = result.wordFormLabel && displayedLemma
+    ? displayedLemma + " · " + result.wordFormLabel
     : "";
   tooltip.wordFormEl.textContent = form;
   tooltip.semanticHintEl.textContent = result.semanticHint || "";
@@ -3406,6 +3407,7 @@ function renderSelectionTooltip(
     translationProvider?: string;
     contextualPartOfSpeech?: string;
     lemma?: string;
+    lexicalLemma?: string;
     wordFormLabel?: string;
     semanticHint?: string;
     alternativeMeanings?: LexiconLookupResult["alternativeMeanings"];
@@ -3430,6 +3432,7 @@ function renderSelectionTooltip(
   if (isSingleEnglishWord(context.text)) {
     renderLexicalMeaningDisplay({
       lemma: result?.lemma || normalizeSingleEnglishWord(context.text),
+      lexicalLemma: result?.lexicalLemma,
       wordFormLabel: result?.wordFormLabel,
       semanticHint: result?.semanticHint,
       alternativeMeanings: result?.alternativeMeanings,
@@ -3840,6 +3843,7 @@ async function requestSelectionTranslation(
     translationProvider?: string;
     contextualPartOfSpeech?: string;
     lemma?: string;
+    lexicalLemma?: string;
     wordFormLabel?: string;
     semanticHint?: string;
     alternativeMeanings?: LexiconLookupResult["alternativeMeanings"];
@@ -3859,6 +3863,7 @@ async function requestSelectionTranslation(
           translationProvider: response.result.translationProvider,
           contextualPartOfSpeech: response.result.contextualPartOfSpeech,
           lemma: response.result.lemma,
+          lexicalLemma: response.result.lexicalLemma,
           wordFormLabel: response.result.wordFormLabel,
           semanticHint: response.result.semanticHint,
           alternativeMeanings: response.result.alternativeMeanings,

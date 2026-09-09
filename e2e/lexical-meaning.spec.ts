@@ -41,7 +41,7 @@ test("single-word selection uses the lexical pipeline and renders sense metadata
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(openAiResponse(JSON.stringify({
+      body: openAiResponse(JSON.stringify({
         word: "瓦解",
         pos: "verb",
         hint: "系统或机制突然失效",
@@ -49,7 +49,7 @@ test("single-word selection uses the lexical pipeline and renders sense metadata
           { meaning: "倒塌", hint: "建筑物或结构", pos: "verb" },
           { meaning: "倒下", hint: "人因虚弱或疾病", pos: "verb" },
         ],
-      }))),
+      })),
     });
   });
 

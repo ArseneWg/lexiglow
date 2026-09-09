@@ -113,14 +113,14 @@ for (const site of sites) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(openAiResponse(JSON.stringify({
+        body: openAiResponse(JSON.stringify({
           word: "语境义",
           pos: "noun",
           hint: "当前网页语境中的具体含义",
           alternatives: [
             { meaning: "其他常见义", hint: "另一种常见使用场景", pos: "noun" },
           ],
-        }))),
+        })),
       });
     });
 
@@ -141,12 +141,12 @@ test("React real page sends live Kaikki senses into contextual meaning resolutio
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(openAiResponse(JSON.stringify({
+      body: openAiResponse(JSON.stringify({
         word: "组件",
         pos: "noun",
         hint: "构成更大系统的一个部分",
         alternatives: [],
-      }))),
+      })),
     });
   });
 

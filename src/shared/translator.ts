@@ -160,7 +160,6 @@ function buildWordTranslationSystemPrompt(
     return (
       `${buildLearnerLevelInstruction(learnerLevel, knownCount)} ` +
       senseInstruction +
-      senseInstruction +
       "Translate the target English word or short phrase based on the sentence context. " +
       `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
       `First identify the exact meaning in ${meaningLanguage}. ` +
@@ -174,6 +173,7 @@ function buildWordTranslationSystemPrompt(
 
   if (mode === "sentence") {
     return (
+      senseInstruction +
       "Translate the target English word or short phrase based on the sentence context. " +
       `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
@@ -1503,7 +1503,7 @@ export async function translateWithLlm({
       systemPrompt: buildWordTranslationSystemPrompt(settings, learnerLevel, knownCount, mode),
       userPrompt: `word: ${surface}\nlemma: ${structuredLexicon.lemma || resolveLookupLemma(surface)}\nword_form: ${structuredLexicon.wordFormLabel || "canonical"}\nsentence: ${sentence}\ndictionary_senses:\n${dictionarySenses}`,
       temperature: 0,
-      maxTokens: needsEnglishExplanation ? 140 : needsSentence ? 96 : 40,
+      maxTokens: needsEnglishExplanation ? 240 : needsSentence ? 220 : 180,
       timeoutMs: WORD_TRANSLATION_REQUEST_TIMEOUT_MS,
       preferJson: true,
     }));
@@ -1555,6 +1555,8 @@ export async function translateWithLlm({
     sentenceTranslation: parsed.sentenceTranslation,
     englishExplanation: parsed.englishExplanation,
     contextualPartOfSpeech: parsed.contextualPartOfSpeech,
+    lexicalLemma: structuredLexicon.lemma || undefined,
+    wordFormLabel: structuredLexicon.wordFormLabel,
     semanticHint: parsed.semanticHint,
     alternativeMeanings: parsed.alternativeMeanings,
     provider: getLlmProviderTag(),
