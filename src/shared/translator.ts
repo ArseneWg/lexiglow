@@ -804,6 +804,8 @@ export function parseLlmTranslationResponse(payload: string): {
   sentenceTranslation?: string;
   englishExplanation?: string;
   contextualPartOfSpeech?: string;
+  semanticHint?: string;
+  alternativeMeanings?: Array<{ meaning: string; semanticHint?: string; partOfSpeech?: string }>;
 } {
   const content = stripCodeFence(payload);
   const jsonStart = content.indexOf("{");
@@ -1486,7 +1488,7 @@ export async function translateWithLlm({
   const structuredLexicon = await lookupStructuredLexicalSenses(surface, {
     contextText: sentence,
     learnerLanguageCode: settings.learnerLanguageCode,
-  }).catch(() => ({ surface, lemma: resolveLookupLemma(surface), senses: [] }));
+  }).catch(() => ({ surface, lemma: resolveLookupLemma(surface), wordFormLabel: undefined, senses: [] }));
   const dictionarySenses = formatStructuredSensesForPrompt(structuredLexicon);
   const mode = responseMode ?? settings.llmDisplayMode;
   const needsSentence = mode === "sentence";

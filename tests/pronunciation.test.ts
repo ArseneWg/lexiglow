@@ -33,6 +33,17 @@ function textResponse(payload: string, ok = true) {
   };
 }
 
+describe("tts playback event classification", () => {
+  test("does not report a false failure after audible playback starts", () => {
+    expect(classifyTtsPlaybackEvent("start", false)).toBe("pending");
+    expect(classifyTtsPlaybackEvent("cancelled", true)).toBe("success");
+    expect(classifyTtsPlaybackEvent("interrupted", true)).toBe("success");
+    expect(classifyTtsPlaybackEvent("cancelled", false)).toBe("failure");
+    expect(classifyTtsPlaybackEvent("error", true)).toBe("failure");
+    expect(classifyTtsPlaybackEvent("end", true)).toBe("success");
+  });
+});
+
 describe("selectVoiceForAccent", () => {
   test("prefers exact british voices", () => {
     const voice = selectVoiceForAccent(
