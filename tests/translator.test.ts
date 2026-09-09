@@ -45,6 +45,26 @@ describe("llm response parsing", () => {
     });
   });
 
+  test("reads contextual sense hints and alternative meanings", () => {
+    expect(parseLlmTranslationResponse(JSON.stringify({
+      word: "瓦解",
+      pos: "verb",
+      hint: "系统或机制突然失效",
+      alternatives: [
+        { meaning: "倒塌", hint: "建筑物或结构", pos: "verb" },
+        { meaning: "倒下", hint: "人因虚弱或疾病", pos: "verb" },
+      ],
+    }))).toEqual({
+      translation: "瓦解",
+      contextualPartOfSpeech: "v.",
+      semanticHint: "系统或机制突然失效",
+      alternativeMeanings: [
+        { meaning: "倒塌", semanticHint: "建筑物或结构", partOfSpeech: "v." },
+        { meaning: "倒下", semanticHint: "人因虚弱或疾病", partOfSpeech: "v." },
+      ],
+    });
+  });
+
   test("falls back to plain text when response is not json", () => {
     expect(parseLlmTranslationResponse("收到的")).toEqual({
       translation: "收到的",

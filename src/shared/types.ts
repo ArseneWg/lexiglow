@@ -60,11 +60,19 @@ export interface TranslatorSettingsState {
 export type LearnerLevelBand = "A1" | "A2" | "B1" | "B2" | "C1";
 export type HighlightIntensity = "strong" | "normal" | "weak" | "none";
 
+export interface AlternativeMeaning {
+  meaning: string;
+  semanticHint?: string;
+  partOfSpeech?: string;
+}
+
 export interface TranslationResult {
   translation: string;
   sentenceTranslation?: string;
   englishExplanation?: string;
   contextualPartOfSpeech?: string;
+  semanticHint?: string;
+  alternativeMeanings?: AlternativeMeaning[];
   provider: string;
   cached: boolean;
 }
@@ -179,6 +187,9 @@ export interface LexiconLookupResult {
   surface: string;
   partOfSpeech?: string;
   contextualPartOfSpeech?: string;
+  wordFormLabel?: string;
+  semanticHint?: string;
+  alternativeMeanings?: AlternativeMeaning[];
   rank: number | null;
   isIgnored: boolean;
   isKnown: boolean;
@@ -203,6 +214,8 @@ export interface CacheEntry {
   sentenceTranslation?: string;
   englishExplanation?: string;
   contextualPartOfSpeech?: string;
+  semanticHint?: string;
+  alternativeMeanings?: AlternativeMeaning[];
   provider: string;
   updatedAt: number;
 }

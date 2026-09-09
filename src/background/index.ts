@@ -22,9 +22,11 @@ import type {
   UpdateBaseRankMessage,
 } from "../shared/messages";
 import {
+  classifyTtsPlaybackEvent,
   hasEnglishVoice,
   selectVoiceForAccent,
 } from "../shared/pronunciation";
+import { describeEnglishWordForm } from "../shared/lexicalSense";
 import { resolvePronunciation } from "../shared/pronunciationResolver";
 import {
   looksLikeContextualSpecialTerm,
@@ -201,6 +203,8 @@ async function getOrTranslate(
       sentenceTranslation: cached.sentenceTranslation,
       englishExplanation: cached.englishExplanation,
       contextualPartOfSpeech: cached.contextualPartOfSpeech,
+      semanticHint: cached.semanticHint,
+      alternativeMeanings: cached.alternativeMeanings,
       provider: cached.provider,
       cached: true,
     };
@@ -227,6 +231,8 @@ async function getOrTranslate(
       sentenceTranslation: result.sentenceTranslation,
       englishExplanation: result.englishExplanation,
       contextualPartOfSpeech: result.contextualPartOfSpeech,
+      semanticHint: result.semanticHint,
+      alternativeMeanings: result.alternativeMeanings,
       provider: result.provider,
       updatedAt: Date.now(),
     }, cacheTtlMs);
@@ -320,6 +326,7 @@ async function handleLookup(message: LookupWordMessage): Promise<LexiconLookupRe
     return {
       lemma,
       surface,
+      wordFormLabel: undefined,
       rank,
       ...flags,
     };
@@ -328,6 +335,7 @@ async function handleLookup(message: LookupWordMessage): Promise<LexiconLookupRe
   return {
     lemma,
     surface,
+    wordFormLabel: describeEnglishWordForm(surface, lemma),
     rank,
     ...flags,
   };
@@ -378,6 +386,7 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
       lemma,
       surface,
       partOfSpeech,
+      wordFormLabel: describeEnglishWordForm(surface, lemma, partOfSpeech),
       rank,
       ...flags,
       isIgnored: false,
@@ -409,6 +418,13 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
               sentenceTranslation: translation.sentenceTranslation,
               englishExplanation: translation.englishExplanation,
               contextualPartOfSpeech: translation.contextualPartOfSpeech,
+              semanticHint: translation.semanticHint,
+              alternativeMeanings: translation.alternativeMeanings,
+              wordFormLabel: describeEnglishWordForm(
+                surface,
+                lemma,
+                translation.contextualPartOfSpeech || partOfSpeech,
+              ),
               translationProvider: translation.provider,
               cached: translation.cached,
             };
@@ -429,6 +445,7 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
       sentenceTranslation: undefined,
       englishExplanation: undefined,
       contextualPartOfSpeech: undefined,
+      wordFormLabel: describeEnglishWordForm(surface, lemma),
       translationProvider: provider === "llm" ? "llm" : "google-web",
       cached: false,
     };
@@ -684,6 +701,7 @@ async function handleSpeakPronunciation(
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let started = false;
 
     chrome.tts.speak(text, {
       lang: accent,
@@ -693,25 +711,18 @@ async function handleSpeakPronunciation(
       volume: 1,
       enqueue: false,
       onEvent(event) {
-        if (settled) {
+        if (settled) return;
+        if (event.type === "start") {
+          started = true;
           return;
         }
-
-        if (event.type === "error") {
-          settled = true;
-          reject(new Error(event.errorMessage || ui(learnerLanguageCode, "errorPronunciationPlaybackFailed")));
-          return;
-        }
-
-        if (event.type === "end") {
-          settled = true;
+        const outcome = classifyTtsPlaybackEvent(event.type, started);
+        if (outcome === "pending") return;
+        settled = true;
+        if (outcome === "success") {
           resolve();
-          return;
-        }
-
-        if (event.type === "interrupted" || event.type === "cancelled") {
-          settled = true;
-          reject(new Error(ui(learnerLanguageCode, "errorPronunciationPlaybackFailed")));
+        } else {
+          reject(new Error(event.errorMessage || ui(learnerLanguageCode, "errorPronunciationPlaybackFailed")));
         }
       },
     });

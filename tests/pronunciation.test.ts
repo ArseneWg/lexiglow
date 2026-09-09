@@ -7,6 +7,7 @@ import {
   extractPronunciationFromCmudictText,
   extractPronunciationFromKaikkiJsonl,
   extractPronunciationFromWiktionaryRaw,
+  classifyTtsPlaybackEvent,
   hasEnglishVoice,
   lookupBestPronunciation,
   selectVoiceForAccent,
