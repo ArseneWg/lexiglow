@@ -9,6 +9,7 @@ const EXTENDED_PRONUNCIATION_LIMIT = 10000;
 const EXTRA_WORDS = [
   "block", "blocks", "bus", "buses", "dog", "dogs", "look", "looked", "play", "played", "want", "wanted",
   "refuse", "record", "lead", "live", "read", "present", "object", "close", "use", "used", "obfuscation",
+  "measure", "measuring",
 ];
 
 async function download(url) {
