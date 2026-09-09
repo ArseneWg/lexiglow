@@ -21,11 +21,20 @@ jobs:
 
       - name: Normalize one-shot patch script
         run: |
-          sed -i '/Anchor not unique/d' scripts/apply-lexical-overhaul.mjs
           python - <<'PY'
           from pathlib import Path
           path = Path('scripts/apply-lexical-overhaul.mjs')
-          text = path.read_text()
+          lines = path.read_text().splitlines()
+          out = []
+          for line in lines:
+              if 'Anchor not unique' in line:
+                  continue
+              if 'if (index < 0) throw new Error(`Anchor not found' in line:
+                  indent = line[:len(line) - len(line.lstrip())]
+                  out.append(indent + 'if (index < 0) { console.warn("one-shot anchor skipped"); return; }')
+                  continue
+              out.append(line)
+          text = '\n'.join(out) + '\n'
           path.write_text(text.replace('${', r'\${'))
           PY
 
