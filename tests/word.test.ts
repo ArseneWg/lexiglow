@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   countEnglishWords,
   extractWordAtOffset,
+  getHyphenatedCompoundComponents,
   isEnglishSelectionText,
   isSingleEnglishWord,
   normalizeSingleEnglishWord,
@@ -104,6 +105,13 @@ describe("selection helpers", () => {
     expect(normalizeSingleEnglishWord("worked,")).toBe("worked");
     expect(normalizeSingleEnglishWord("don’t")).toBe("don't");
     expect(normalizeSingleEnglishWord("high-impact")).toBe("high-impact");
+  });
+
+  test("exposes hyphenated components without changing the compound token", () => {
+    expect(getHyphenatedCompoundComponents("in-page")).toEqual(["in", "page"]);
+    expect(getHyphenatedCompoundComponents("state-of-the-art")).toEqual(["state", "of", "the", "art"]);
+    expect(getHyphenatedCompoundComponents("don’t-stop")).toEqual(["don't", "stop"]);
+    expect(getHyphenatedCompoundComponents("ordinary")).toEqual([]);
   });
 
   test("accepts english words, phrases, and sentences", () => {
