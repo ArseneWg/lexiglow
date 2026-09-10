@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import {
   describeEnglishWordForm,
+  describeLearningIdentity,
   formatStructuredSensesForPrompt,
   lookupStructuredLexicalSenses,
 } from "../src/shared/lexicalSense";
@@ -11,6 +12,18 @@ describe("structured lexical sense lookup", () => {
     expect(describeEnglishWordForm("collapses", "collapse", "verb")).toBe("3sg");
     expect(describeEnglishWordForm("blocks", "block", "noun")).toBe("plural");
     expect(describeEnglishWordForm("tracing", "trace", "verb")).toBe("present participle");
+  });
+
+  test("explains how morphology and compounds share or keep mastery", () => {
+    expect(describeLearningIdentity("worked", "work", "verb")).toBe(
+      "past / participle · mastery shared with work",
+    );
+    expect(describeLearningIdentity("saw", "see", "verb")).toBe(
+      "inflected form · mastery kept separate from see",
+    );
+    expect(describeLearningIdentity("in-page", "in-page")).toBe(
+      "components: in + page · mastery tracked as in-page",
+    );
   });
 
   test("probes later lemma candidates when the first morphology candidate has no dictionary entry", async () => {
@@ -35,7 +48,7 @@ describe("structured lexical sense lookup", () => {
       fetchFn: fetchMock as never,
     });
     expect(result.lemma).toBe("collapse");
-    expect(result.wordFormLabel).toBe("3sg");
+    expect(result.wordFormLabel).toBe("3sg · mastery shared with collapse");
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/collaps.jsonl"))).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/collapse.jsonl"))).toBe(true);
   });
@@ -66,7 +79,7 @@ describe("structured lexical sense lookup", () => {
       fetchFn: fetchMock as never,
     });
     expect(result.lemma).toBe("collapse");
-    expect(result.wordFormLabel).toBe("3sg");
+    expect(result.wordFormLabel).toBe("3sg · mastery shared with collapse");
     expect(result.senses).toHaveLength(2);
     expect(result.senses[0]?.targetMeanings).toContain("倒塌");
     expect(formatStructuredSensesForPrompt(result)).toContain("learner_translations=倒塌");
