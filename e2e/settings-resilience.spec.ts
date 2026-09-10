@@ -63,7 +63,8 @@ test("Options translator settings immediately drive the active page provider and
   await options.goto(`chrome-extension://${extensionId}/dist/options.html`);
   await options.locator("#learnerLanguageCode").selectOption("ja");
   await options.locator("#defaultTranslationProvider").selectOption("llm");
-  await options.locator("#llmProvider").selectOption("openai");
+  await options.locator("#llmProvider").selectOption("openai-compatible");
+  await expect(options.locator("#providerBaseUrl")).not.toHaveAttribute("readonly", "");
   await options.locator("#providerBaseUrl").fill("http://llm.test/v1");
   await options.locator("#providerModel").fill("e2e-options-model");
   await options.locator("#providerApiKey").fill("");
@@ -82,6 +83,7 @@ test("Options translator settings immediately drive the active page provider and
   expect(active).toEqual(expect.objectContaining({
     learnerLanguageCode: "ja",
     defaultTranslationProvider: "llm",
+    llmProvider: "openai-compatible",
     providerBaseUrl: "http://llm.test/v1",
     providerModel: "e2e-options-model",
   }));
@@ -252,4 +254,50 @@ test("SPA-style subtree replacement removes stale highlights and discovers the n
 
   await expect.poll(async () => (await getHighlightTexts(page)).includes("circumlocution")).toBe(true);
   await expect.poll(async () => (await getHighlightTexts(page)).includes("obfuscation")).toBe(false);
+});
+
+
+test("Options expose first-class providers and lock official Base URLs", async ({ context, extensionWorker, extensionId }) => {
+  await seedTranslatorSettings(extensionWorker);
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/dist/options.html`);
+
+  await expect(options.locator("#llmProvider option")).toHaveCount(5);
+  await options.locator("#llmProvider").selectOption("deepseek");
+  await expect(options.locator("#providerBaseUrl")).toHaveValue("https://api.deepseek.com");
+  await expect(options.locator("#providerModel")).toHaveValue("deepseek-v4-flash");
+  await expect(options.locator("#providerBaseUrl")).toHaveAttribute("readonly", "");
+
+  await options.locator("#llmProvider").selectOption("openai-compatible");
+  await expect(options.locator("#providerBaseUrl")).not.toHaveAttribute("readonly", "");
+  await options.close();
+});
+
+test("legacy DeepSeek profiles migrate to the explicit provider without changing their model", async ({ context, extensionWorker, extensionId }) => {
+  await extensionWorker.evaluate(async () => {
+    await chrome.storage.local.set({
+      translatorSettings: {
+        activeProfileId: "legacy-deepseek",
+        profiles: [{
+          id: "legacy-deepseek",
+          name: "Legacy DeepSeek",
+          defaultTranslationProvider: "llm",
+          llmProvider: "openai",
+          providerBaseUrl: "https://api.deepseek.com",
+          providerModel: "deepseek-v4-flash",
+          apiKey: "",
+          fallbackToGoogle: true,
+          learnerLanguageCode: "zh-CN",
+          llmDisplayMode: "word",
+          cacheDurationValue: 30,
+          cacheDurationUnit: "minutes",
+        }],
+      },
+    });
+  });
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/dist/options.html`);
+  await expect(options.locator("#llmProvider")).toHaveValue("deepseek");
+  await expect(options.locator("#providerModel")).toHaveValue("deepseek-v4-flash");
+  await options.close();
 });

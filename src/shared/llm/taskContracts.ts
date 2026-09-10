@@ -1,9 +1,14 @@
+
 import type { LlmTaskContract, LlmTaskKind } from "./contracts";
 
 const POS_ENUM = [
   "noun", "verb", "adjective", "adverb", "pronoun", "preposition",
   "conjunction", "determiner", "auxiliary", "phrase",
 ];
+const HIGHLIGHT_CATEGORIES = [
+  "subject", "predicate", "nonfinite", "conjunction", "relative", "preposition",
+];
+const CLAUSE_TYPES = ["main", "relative", "subordinate", "nonfinite", "parallel", "modifier"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -44,9 +49,7 @@ const contextualWord: LlmTaskContract = {
   },
   example: { word: "预测", pos: "noun", hint: "此处表示模型预测" },
   reasoning: "off",
-  validate(value) {
-    return validatesContextualWordFields(value);
-  },
+  validate(value) { return validatesContextualWordFields(value); },
 };
 
 const contextualWordSentence: LlmTaskContract = {
@@ -58,16 +61,9 @@ const contextualWordSentence: LlmTaskContract = {
     required: ["word", "sentence", "pos", "hint"],
     additionalProperties: false,
   },
-  example: {
-    word: "预测",
-    sentence: "这些预测与基准结果一致。",
-    pos: "noun",
-    hint: "此处表示模型预测",
-  },
+  example: { word: "预测", sentence: "这些预测与基准结果一致。", pos: "noun", hint: "此处表示模型预测" },
   reasoning: "off",
-  validate(value) {
-    return validatesContextualWordFields(value, ["sentence"]);
-  },
+  validate(value) { return validatesContextualWordFields(value, ["sentence"]); },
 };
 
 const contextualWordEnglish: LlmTaskContract = {
@@ -79,16 +75,9 @@ const contextualWordEnglish: LlmTaskContract = {
     required: ["word", "english", "pos", "hint"],
     additionalProperties: false,
   },
-  example: {
-    word: "预测",
-    english: "A guess about what will happen next.",
-    pos: "noun",
-    hint: "此处表示模型预测",
-  },
+  example: { word: "预测", english: "A guess about what will happen next.", pos: "noun", hint: "此处表示模型预测" },
   reasoning: "off",
-  validate(value) {
-    return validatesContextualWordFields(value, ["english"]);
-  },
+  validate(value) { return validatesContextualWordFields(value, ["english"]); },
 };
 
 const selectionTranslation: LlmTaskContract = {
@@ -102,9 +91,7 @@ const selectionTranslation: LlmTaskContract = {
   },
   example: { word: "所选文本的自然翻译" },
   reasoning: "off",
-  validate(value) {
-    return isRecord(value) && nonEmptyString(value.word);
-  },
+  validate(value) { return isRecord(value) && nonEmptyString(value.word); },
 };
 
 const englishExplanation: LlmTaskContract = {
@@ -112,36 +99,51 @@ const englishExplanation: LlmTaskContract = {
   schemaName: "lexiglow_english_explanation",
   schema: {
     type: "object",
-    properties: {
-      meaning: { type: "string" },
-      explanation: { type: "string" },
-    },
+    properties: { meaning: { type: "string" }, explanation: { type: "string" } },
     required: ["meaning", "explanation"],
     additionalProperties: false,
   },
-  example: {
-    meaning: "预测",
-    explanation: "A guess about what will happen next.",
-  },
+  example: { meaning: "预测", explanation: "A guess about what will happen next." },
   reasoning: "off",
-  validate(value) {
-    return requiresStrings(value, ["meaning", "explanation"]);
-  },
+  validate(value) { return requiresStrings(value, ["meaning", "explanation"]); },
 };
 
 const highlightItem = {
   type: "object",
   properties: {
-    category: {
-      type: "string",
-      enum: ["subject", "predicate", "nonfinite", "conjunction", "relative", "preposition"],
-    },
-    text: { type: "string" },
+    category: { type: "string", enum: HIGHLIGHT_CATEGORIES },
     tokenIndex: { type: "integer", minimum: 0 },
   },
-  required: ["category", "text", "tokenIndex"],
+  required: ["category", "tokenIndex"],
   additionalProperties: false,
 };
+
+const clauseBlockItem = {
+  type: "object",
+  properties: {
+    type: { type: "string", enum: CLAUSE_TYPES },
+    startToken: { type: "integer", minimum: 0 },
+    endToken: { type: "integer", minimum: 0 },
+  },
+  required: ["type", "startToken", "endToken"],
+  additionalProperties: false,
+};
+
+function validatesSentenceAnalysis(value: unknown): boolean {
+  if (!requiresStrings(value, ["translation", "structure"]) || !isRecord(value)) return false;
+  if (!Array.isArray(value.analysisSteps) || value.analysisSteps.length !== 4 || !value.analysisSteps.every(nonEmptyString)) return false;
+  if (!Array.isArray(value.highlights) || value.highlights.length < 1 || value.highlights.length > 8) return false;
+  if (!value.highlights.every((item) => isRecord(item)
+    && typeof item.category === "string"
+    && HIGHLIGHT_CATEGORIES.includes(item.category)
+    && Number.isInteger(item.tokenIndex))) return false;
+  if (!Array.isArray(value.clauseBlocks) || value.clauseBlocks.length < 1 || value.clauseBlocks.length > 10) return false;
+  return value.clauseBlocks.every((item) => isRecord(item)
+    && typeof item.type === "string"
+    && CLAUSE_TYPES.includes(item.type)
+    && Number.isInteger(item.startToken)
+    && Number.isInteger(item.endToken));
+}
 
 const sentenceAnalysis: LlmTaskContract = {
   kind: "sentence-analysis",
@@ -151,24 +153,9 @@ const sentenceAnalysis: LlmTaskContract = {
     properties: {
       translation: { type: "string" },
       structure: { type: "string" },
-      analysisSteps: {
-        type: "array",
-        minItems: 4,
-        maxItems: 4,
-        items: { type: "string" },
-      },
-      highlights: {
-        type: "array",
-        minItems: 1,
-        maxItems: 8,
-        items: highlightItem,
-      },
-      clauseBlocks: {
-        type: "array",
-        minItems: 1,
-        maxItems: 10,
-        items: { type: "string" },
-      },
+      analysisSteps: { type: "array", minItems: 4, maxItems: 4, items: { type: "string" } },
+      highlights: { type: "array", minItems: 1, maxItems: 8, items: highlightItem },
+      clauseBlocks: { type: "array", minItems: 1, maxItems: 10, items: clauseBlockItem },
     },
     required: ["translation", "structure", "analysisSteps", "highlights", "clauseBlocks"],
     additionalProperties: false,
@@ -177,20 +164,11 @@ const sentenceAnalysis: LlmTaskContract = {
     translation: "完整翻译",
     structure: "Models improve.",
     analysisSteps: ["步骤一", "步骤二", "步骤三", "步骤四"],
-    highlights: [{ category: "subject", text: "Models", tokenIndex: 0 }],
-    clauseBlocks: ["main|||Models improve."],
+    highlights: [{ category: "subject", tokenIndex: 0 }],
+    clauseBlocks: [{ type: "main", startToken: 0, endToken: 1 }],
   },
   reasoning: "low",
-  validate(value) {
-    return requiresStrings(value, ["translation", "structure"])
-      && isRecord(value)
-      && Array.isArray(value.analysisSteps)
-      && value.analysisSteps.length === 4
-      && Array.isArray(value.highlights)
-      && value.highlights.length > 0
-      && Array.isArray(value.clauseBlocks)
-      && value.clauseBlocks.length > 0;
-  },
+  validate: validatesSentenceAnalysis,
 };
 
 const contracts: Record<LlmTaskKind, LlmTaskContract> = {

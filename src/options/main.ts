@@ -40,6 +40,7 @@ import {
   sanitizeTranslatorProfile,
 } from "../shared/translator";
 import type { TranslatorProfile, TranslatorSettings, TranslatorSettingsState, UserSettings } from "../shared/types";
+import { getLlmProviderDefinition, isLlmProviderKind, LLM_PROVIDER_OPTIONS } from "../shared/llm/providerRegistry";
 
 interface SearchEntry {
   lemma: string;
@@ -83,6 +84,7 @@ let llmProvider!: HTMLSelectElement;
 let providerBaseUrl!: HTMLInputElement;
 let providerModel!: HTMLInputElement;
 let providerApiKey!: HTMLInputElement;
+let providerHint!: HTMLElement;
 let llmDisplayMode!: HTMLSelectElement;
 let cacheDurationValue!: HTMLInputElement;
 let cacheDurationUnit!: HTMLSelectElement;
@@ -110,6 +112,10 @@ function renderLanguageOptionsMarkup(): string {
     .join("");
 }
 
+function renderLlmProviderOptionsMarkup(): string {
+  return LLM_PROVIDER_OPTIONS.map((provider) => `<option value="${provider.kind}">${provider.label}</option>`).join("");
+}
+
 function renderProfileOptionsMarkup(): string {
   return translatorSettingsState.profiles
     .map((profile) => {
@@ -135,12 +141,7 @@ function buildProfileFromForm(profile: TranslatorProfile): TranslatorProfile {
   return sanitizeTranslatorProfile({
     id: profile.id,
     name: profile.name,
-    llmProvider:
-      llmProvider.value === "gemini"
-        ? "gemini"
-        : llmProvider.value === "claude"
-          ? "claude"
-          : "openai",
+    llmProvider: isLlmProviderKind(llmProvider.value) ? llmProvider.value : "openai",
     defaultTranslationProvider: defaultTranslationProvider.value === "llm" ? "llm" : "google",
     learnerLanguageCode: learnerLanguageCode.value as TranslatorSettings["learnerLanguageCode"],
     providerBaseUrl: providerBaseUrl.value,
@@ -214,6 +215,7 @@ function assignRefs() {
   providerBaseUrl = document.querySelector<HTMLInputElement>("#providerBaseUrl")!;
   providerModel = document.querySelector<HTMLInputElement>("#providerModel")!;
   providerApiKey = document.querySelector<HTMLInputElement>("#providerApiKey")!;
+  providerHint = document.querySelector<HTMLElement>("#providerHint")!;
   llmDisplayMode = document.querySelector<HTMLSelectElement>("#llmDisplayMode")!;
   cacheDurationValue = document.querySelector<HTMLInputElement>("#cacheDurationValue")!;
   cacheDurationUnit = document.querySelector<HTMLSelectElement>("#cacheDurationUnit")!;
@@ -389,6 +391,16 @@ function renderIgnoredList() {
     .join("");
 }
 
+function syncProviderFieldPolicy() {
+  const provider = isLlmProviderKind(llmProvider.value) ? llmProvider.value : "openai";
+  const definition = getLlmProviderDefinition(provider);
+  providerBaseUrl.readOnly = !definition.customBaseUrl;
+  providerBaseUrl.setAttribute("aria-readonly", String(!definition.customBaseUrl));
+  providerHint.textContent = definition.customBaseUrl
+    ? ui("optionsProviderCustomHint")
+    : ui("optionsProviderNativeHint", { provider: definition.label, api: definition.nativeApi });
+}
+
 function renderAll() {
   setRankInputs(settings.knownBaseRank);
   totalKnownCount.textContent = String(countTotalKnown(settings));
@@ -403,6 +415,7 @@ function renderAll() {
   providerBaseUrl.value = translatorSettings.providerBaseUrl;
   providerModel.value = translatorSettings.providerModel;
   providerApiKey.value = translatorSettings.apiKey;
+  syncProviderFieldPolicy();
   llmDisplayMode.value = translatorSettings.llmDisplayMode;
   cacheDurationValue.value = String(translatorSettings.cacheDurationValue);
   cacheDurationUnit.value = translatorSettings.cacheDurationUnit;
@@ -711,14 +724,10 @@ function bindEvents() {
   });
 
   llmProvider.addEventListener("change", () => {
-    const provider =
-      llmProvider.value === "gemini"
-        ? "gemini"
-        : llmProvider.value === "claude"
-          ? "claude"
-          : "openai";
+    const provider = isLlmProviderKind(llmProvider.value) ? llmProvider.value : "openai";
     providerBaseUrl.value = getDefaultLlmBaseUrl(provider);
     providerModel.value = getDefaultLlmModel(provider);
+    syncProviderFieldPolicy();
   });
 }
 
@@ -787,14 +796,15 @@ function renderShell() {
             <option value="google">${ui("optionsDefaultTranslationProviderGoogle")}</option>
             <option value="llm">${ui("optionsDefaultTranslationProviderLlm")}</option>
           </select>
-          <select id="llmProvider">
-            <option value="openai">OpenAI / Compatible</option>
-            <option value="gemini">Gemini</option>
-            <option value="claude">Claude</option>
-          </select>
-          <input id="providerBaseUrl" type="text" placeholder="Base URL" />
-          <input id="providerModel" type="text" placeholder="Model" />
+          <label class="muted" for="llmProvider">${ui("optionsLlmProvider")}</label>
+          <select id="llmProvider">${renderLlmProviderOptionsMarkup()}</select>
+          <label class="muted" for="providerBaseUrl">${ui("optionsProviderBaseUrl")}</label>
+          <input id="providerBaseUrl" type="text" placeholder="${ui("optionsProviderBaseUrl")}" />
+          <label class="muted" for="providerModel">${ui("optionsProviderModel")}</label>
+          <input id="providerModel" type="text" placeholder="${ui("optionsProviderModel")}" />
+          <label class="muted" for="providerApiKey">${ui("optionsProviderApiKey")}</label>
           <input id="providerApiKey" type="password" placeholder="${ui("optionsApiKeyPlaceholder")}" />
+          <p class="muted" id="providerHint"></p>
           <select id="llmDisplayMode">
             <option value="word">${ui("optionsDisplayModeWord")}</option>
             <option value="sentence">${ui("optionsDisplayModeSentence")}</option>

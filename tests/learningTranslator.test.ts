@@ -23,7 +23,7 @@ function openAiResponse(content: unknown) {
 const localSettings = {
   ...DEFAULT_TRANSLATOR_SETTINGS,
   defaultTranslationProvider: "llm" as const,
-  llmProvider: "openai" as const,
+  llmProvider: "openai-compatible" as const,
   providerBaseUrl: "http://localhost:8080/v1",
   providerModel: "local-model",
   apiKey: "",
@@ -67,18 +67,18 @@ describe("learning translation behavior", () => {
       translation: "模型处理长难句。",
       structure: "model handles sentences",
       analysisSteps: ["切分。", "找主干。", "看修饰。", "按语序翻译。"],
-      highlights: [{ category: "predicate", text: "handles", tokenIndex: 2 }],
-      clauseBlocks: ["main|||The model"],
+      highlights: [{ category: "predicate", tokenIndex: 2 }],
+      clauseBlocks: [{ type: "main", startToken: 1, endToken: 7 }],
     };
     const second = {
       translation: "该模型能以清晰的结构处理复杂句子。",
       structure: "model handles sentences",
       analysisSteps: ["先按结构切分。", "主干是 model handles sentences。", "with clear structure 是方式修饰。", "先译主干再补修饰。"],
       highlights: [
-        { category: "subject", text: "model", tokenIndex: 1 },
-        { category: "predicate", text: "handles", tokenIndex: 2 },
+        { category: "subject", tokenIndex: 1 },
+        { category: "predicate", tokenIndex: 2 },
       ],
-      clauseBlocks: [`main|||${sentence}`],
+      clauseBlocks: [{ type: "main", startToken: 0, endToken: 7 }],
     };
 
     const fetchMock = vi.fn()
@@ -118,10 +118,10 @@ describe("learning translation behavior", () => {
         structure: "system uses training",
         analysisSteps: ["切分。", "主干是 system uses training。", "mixed-precision 修饰 training。", "按主干再修饰的顺序翻译。"],
         highlights: [
-          { category: "subject", text: "system", tokenIndex: 1 },
-          { category: "predicate", text: "uses", tokenIndex: 2 },
+          { category: "subject", tokenIndex: 1 },
+          { category: "predicate", tokenIndex: 2 },
         ],
-        clauseBlocks: [`main|||${sentence}`],
+        clauseBlocks: [{ type: "main", startToken: 0, endToken: 5 }],
       });
     });
     vi.stubGlobal("fetch", fetchMock);

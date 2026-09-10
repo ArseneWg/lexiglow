@@ -34,9 +34,11 @@ export type SupportedLearnerLanguageCode =
   | "th"
   | "ar";
 
+export type LlmProviderKind = "openai" | "deepseek" | "gemini" | "anthropic" | "openai-compatible";
+
 export interface TranslatorSettings {
   defaultTranslationProvider: "google" | "llm";
-  llmProvider: "openai" | "gemini" | "claude";
+  llmProvider: LlmProviderKind;
   providerBaseUrl: string;
   providerModel: string;
   apiKey: string;
@@ -162,6 +164,8 @@ export interface SentenceClauseBlock {
   text: string;
   type: SentenceClauseBlockType;
   label?: string;
+  startToken?: number;
+  endToken?: number;
 }
 
 export interface SentenceAnalysisResult {
