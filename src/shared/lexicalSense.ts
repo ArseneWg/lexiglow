@@ -1,3 +1,4 @@
+import { resolveMasteryIdentity } from "./lexicon";
 import { getLemmaCandidates } from "./normalize";
 import type { AlternativeMeaning, SupportedLearnerLanguageCode } from "./types";
 
@@ -160,6 +161,31 @@ export function describeEnglishWordForm(surface: string, lemma: string, partOfSp
   return "inflected form";
 }
 
+export function describeLearningIdentity(
+  surface: string,
+  lemma: string,
+  partOfSpeech?: string,
+): string | undefined {
+  const formLabel = describeEnglishWordForm(surface, lemma, partOfSpeech);
+  const identity = resolveMasteryIdentity(surface, lemma);
+  const details: string[] = [];
+
+  if (formLabel) {
+    details.push(formLabel);
+  }
+
+  if (identity.kind === "compound" && identity.components?.length) {
+    details.push(`components: ${identity.components.join(" + ")}`);
+    details.push(`mastery tracked as ${identity.masteryKey}`);
+  } else if (identity.kind === "shared-inflection") {
+    details.push(`mastery shared with ${identity.masteryKey}`);
+  } else if (identity.kind === "independent-inflection") {
+    details.push(`mastery kept separate from ${identity.lexicalLemma || lemma}`);
+  }
+
+  return details.length ? details.join(" · ") : undefined;
+}
+
 function collectSenses(
   entries: readonly KaikkiEntryLike[],
   contextText: string,
@@ -254,7 +280,7 @@ export async function lookupStructuredLexicalSenses(
   return {
     surface,
     lemma: lemma || normalized,
-    wordFormLabel: describeEnglishWordForm(surface, lemma || normalized, lexicalPos),
+    wordFormLabel: describeLearningIdentity(surface, lemma || normalized, lexicalPos),
     senses,
   };
 }
@@ -271,7 +297,6 @@ export function formatStructuredSensesForPrompt(lookup: StructuredLexicalLookup)
     return "[" + (index + 1) + "] " + sense.gloss + (extras ? " (" + extras + ")" : "");
   }).join("\n");
 }
-
 
 function normalizeLexicalMetadataCacheKeyPart(value: string, limit: number): string {
   return value.replace(/\s+/g, " ").trim().slice(0, limit);
