@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  buildStructuredLexicalMetadata,
   describeEnglishWordForm,
   describeLearningIdentity,
   formatStructuredSensesForPrompt,
@@ -23,6 +24,9 @@ describe("structured lexical sense lookup", () => {
     );
     expect(describeLearningIdentity("in-page", "in-page")).toBe(
       "components: in + page · mastery tracked as in-page",
+    );
+    expect(describeLearningIdentity("in-page", "in-page", undefined, "zh-CN")).toBe(
+      "组成部分：in + page · 学习状态单独记录为 in-page",
     );
   });
 
@@ -48,7 +52,13 @@ describe("structured lexical sense lookup", () => {
       fetchFn: fetchMock as never,
     });
     expect(result.lemma).toBe("collapse");
-    expect(result.wordFormLabel).toBe("3sg · mastery shared with collapse");
+    expect(result.wordFormLabel).toBe("3sg");
+    expect(describeLearningIdentity(
+      result.surface,
+      result.lemma,
+      "verb",
+      result.learnerLanguageCode,
+    )).toBe("3sg · 学习状态与 collapse 共享");
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/collaps.jsonl"))).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/collapse.jsonl"))).toBe(true);
   });
@@ -79,26 +89,26 @@ describe("structured lexical sense lookup", () => {
       fetchFn: fetchMock as never,
     });
     expect(result.lemma).toBe("collapse");
-    expect(result.wordFormLabel).toBe("3sg · mastery shared with collapse");
+    expect(result.wordFormLabel).toBe("3sg");
     expect(result.senses).toHaveLength(2);
     expect(result.senses[0]?.targetMeanings).toContain("倒塌");
     expect(formatStructuredSensesForPrompt(result)).toContain("learner_translations=倒塌");
   });
 });
 
-test("builds visible metadata for the fast translation path", async () => {
-  const { buildStructuredLexicalMetadata } = await import("../src/shared/lexicalSense");
+test("builds visible metadata for the fast translation path", () => {
   const metadata = buildStructuredLexicalMetadata({
     surface: "predictions",
     lemma: "prediction",
     wordFormLabel: "plural",
+    learnerLanguageCode: "zh-CN",
     senses: [
       { partOfSpeech: "noun", gloss: "A statement about what will happen in the future.", targetMeanings: ["预测", "预言"], source: "kaikki" },
       { partOfSpeech: "noun", gloss: "A forecast produced by a model.", targetMeanings: ["预测结果"], source: "kaikki" },
     ],
   }, "预测");
   expect(metadata.lexicalLemma).toBe("prediction");
-  expect(metadata.wordFormLabel).toBe("plural");
+  expect(metadata.wordFormLabel).toBe("plural · 学习状态与 prediction 共享");
   expect(metadata.semanticHint).toContain("statement");
   expect(metadata.alternativeMeanings?.map((item) => item.meaning)).toEqual(["预言", "预测结果"]);
 });
