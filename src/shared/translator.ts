@@ -3,9 +3,19 @@ import { lookupRank, resolveLookupLemma } from "./lexicon";
 import { countTotalKnown, estimateLearnerLevel, resolveWordFlags } from "./settings";
 import { createEnglishTokenMatcher } from "./word";
 import {
+  buildStructuredLexicalMetadata,
   formatStructuredSensesForPrompt,
   lookupStructuredLexicalSenses,
 } from "./lexicalSense";
+import {
+  legacyOpenAiConnectionFromSettings,
+  requestOpenAiCompatibleTask,
+} from "./llm/openAiCompatible";
+import {
+  LlmProviderFormatError,
+  LlmProviderRequestError,
+  type LlmTaskKind,
+} from "./llm/contracts";
 import type {
   EnglishExplanationResult,
   LearnerLevelBand,
@@ -154,7 +164,7 @@ function buildWordTranslationSystemPrompt(
 
   const senseInstruction =
     "Use the dictionary_senses supplied in the user message as anchors when they fit the sentence, but do not force a listed sense when the context clearly uses a newer technical or domain-specific meaning. " +
-    "Choose one exact contextual meaning. Return a short semantic hint describing the usage domain or object type, and at most three other common meanings that are genuinely distinct and useful to a learner. Exclude obscure, obsolete, or duplicate senses. ";
+    "Choose one exact contextual meaning and return a short semantic hint describing the usage domain or object type. Alternative meanings are handled separately from structured dictionary data; do not enumerate them. ";
 
   if (mode === "english") {
     return (
@@ -167,7 +177,7 @@ function buildWordTranslationSystemPrompt(
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
       "Use simple, common English. Avoid advanced synonyms, long clauses, and dictionary jargon. " +
       "Avoid using the target word or its inflections in the explanation unless absolutely necessary. " +
-      'Return strict JSON only: {"word":"<precise meaning in the learner language>","english":"<one short easy English sentence>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in the learner language>","alternatives":[{"meaning":"<other common meaning in learner language>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown or extra text.'
+      'Return strict JSON only: {"word":"<precise meaning in the learner language>","english":"<one short easy English sentence>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in the learner language>"}. No markdown or extra text.'
     );
   }
 
@@ -177,7 +187,7 @@ function buildWordTranslationSystemPrompt(
       "Translate the target English word or short phrase based on the sentence context. " +
       `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
-      `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","sentence":"<full sentence translation in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>","alternatives":[{"meaning":"<other common meaning in ${meaningLanguage}>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown, no explanation.`
+      `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","sentence":"<full sentence translation in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>"}. No markdown, no explanation.`
     );
   }
 
@@ -186,7 +196,7 @@ function buildWordTranslationSystemPrompt(
     "Translate the target English word or short phrase based on the sentence context. " +
     `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
     "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
-    `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>","alternatives":[{"meaning":"<other common meaning in ${meaningLanguage}>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown or extra text.`
+    `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>"}. No markdown or extra text.`
   );
 }
 
@@ -425,10 +435,6 @@ function resolveLlmEndpoint(settings: TranslatorSettings): string {
   }
 }
 
-function shouldDisableOpenAiCompatibleThinking(settings: TranslatorSettings): boolean {
-  return settings.llmProvider === "openai" && settings.providerModel.trim().toLowerCase().includes("qwen3");
-}
-
 async function requestLlmText({
   settings,
   systemPrompt,
@@ -437,6 +443,7 @@ async function requestLlmText({
   maxTokens,
   timeoutMs,
   preferJson,
+  task,
 }: {
   settings: TranslatorSettings;
   systemPrompt: string;
@@ -445,7 +452,28 @@ async function requestLlmText({
   maxTokens: number;
   timeoutMs: number;
   preferJson?: boolean;
+  task?: LlmTaskKind;
 }): Promise<{ content: string; finishReason: string; payload: unknown; response: Response }> {
+  if (settings.llmProvider === "openai") {
+    if (!preferJson || !task) {
+      throw new LlmProviderFormatError("OpenAI-compatible v2 requires an explicit structured task contract.");
+    }
+    const result = await requestOpenAiCompatibleTask({
+      connection: legacyOpenAiConnectionFromSettings(settings),
+      task,
+      systemPrompt,
+      userPrompt,
+      maxTokens,
+      timeoutMs,
+    });
+    return {
+      content: result.content,
+      finishReason: result.finishReason,
+      payload: result.payload,
+      response: result.response,
+    };
+  }
+
   const endpoint = resolveLlmEndpoint(settings);
 
   let init: RequestInit;
@@ -498,38 +526,6 @@ async function requestLlmText({
         }),
       };
       break;
-    case "openai":
-      const openAiCompatibleRequestBody: Record<string, unknown> = {
-        model: settings.providerModel,
-        temperature,
-        max_tokens: maxTokens,
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          {
-            role: "user",
-            content: userPrompt,
-          },
-        ],
-      };
-
-      if (shouldDisableOpenAiCompatibleThinking(settings)) {
-        openAiCompatibleRequestBody.chat_template_kwargs = {
-          enable_thinking: false,
-        };
-      }
-
-      init = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(settings.apiKey.trim() ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
-        },
-        body: JSON.stringify(openAiCompatibleRequestBody),
-      };
-      break;
   }
 
   const response = await fetchWithTimeout(endpoint, init, timeoutMs);
@@ -555,13 +551,6 @@ async function requestLlmText({
         payload,
         response,
       };
-    case "openai":
-      return {
-        content: readOpenAiContent(payload),
-        finishReason: readOpenAiFinishReason(payload),
-        payload,
-        response,
-      };
   }
 }
 
@@ -573,6 +562,13 @@ function requiresLlmApiKey(settings: TranslatorSettings): boolean {
   } catch {
     return true;
   }
+}
+
+function getLlmRequestStatus(error: unknown): number {
+  if (error instanceof LlmRequestError || error instanceof LlmProviderRequestError) {
+    return error.status ?? 0;
+  }
+  return 0;
 }
 
 function shouldFallbackToGoogle(status: number, message: string): boolean {
@@ -1289,11 +1285,12 @@ async function requestSentenceAnalysis({
       maxTokens: 1600,
       timeoutMs: SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS,
       preferJson: true,
+      task: "sentence-analysis",
     });
   } catch (error) {
     throw new SentenceAnalysisRequestError(
       error instanceof Error ? error.message : "LLM analysis request failed.",
-      { status: error instanceof LlmRequestError ? error.status : undefined, responseText: "", stage: qualityRetry ? "quality-retry" : "single-shot" },
+      { status: getLlmRequestStatus(error) || undefined, responseText: "", stage: qualityRetry ? "quality-retry" : "single-shot" },
     );
   }
 
@@ -1413,6 +1410,7 @@ async function requestEnglishExplanation({
     maxTokens: 140,
     timeoutMs: WORD_TRANSLATION_REQUEST_TIMEOUT_MS,
     preferJson: true,
+    task: "english-explanation",
   });
 
   return parseEnglishExplanationResponse(content);
@@ -1506,11 +1504,19 @@ export async function translateWithLlm({
       maxTokens: needsEnglishExplanation ? 240 : needsSentence ? 220 : 180,
       timeoutMs: WORD_TRANSLATION_REQUEST_TIMEOUT_MS,
       preferJson: true,
+      task: mode === "sentence"
+        ? "contextual-word-sentence"
+        : mode === "english"
+          ? "contextual-word-english"
+          : "contextual-word",
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "LLM request failed.";
 
-    if (shouldFallbackToGoogle(error instanceof LlmRequestError ? error.status ?? 0 : 0, message)) {
+    if (
+      error instanceof LlmProviderFormatError
+      || shouldFallbackToGoogle(getLlmRequestStatus(error), message)
+    ) {
       throw new TranslatorFallbackError(message);
     }
 
@@ -1550,15 +1556,21 @@ export async function translateWithLlm({
     throw new TranslatorFallbackError("LLM translation response was empty.");
   }
 
+  const structuredMetadata = buildStructuredLexicalMetadata(
+    structuredLexicon,
+    parsed.translation,
+  );
+
   return {
     translation: parsed.translation,
     sentenceTranslation: parsed.sentenceTranslation,
     englishExplanation: parsed.englishExplanation,
-    contextualPartOfSpeech: parsed.contextualPartOfSpeech,
-    lexicalLemma: structuredLexicon.lemma || undefined,
-    wordFormLabel: structuredLexicon.wordFormLabel,
-    semanticHint: parsed.semanticHint,
-    alternativeMeanings: parsed.alternativeMeanings,
+    contextualPartOfSpeech:
+      parsed.contextualPartOfSpeech || structuredMetadata.contextualPartOfSpeech,
+    lexicalLemma: structuredMetadata.lexicalLemma,
+    wordFormLabel: structuredMetadata.wordFormLabel,
+    semanticHint: parsed.semanticHint || structuredMetadata.semanticHint,
+    alternativeMeanings: structuredMetadata.alternativeMeanings,
     provider: getLlmProviderTag(),
     cached: false,
   };
@@ -1590,11 +1602,15 @@ export async function translateSelectionWithLlm({
       maxTokens: 180,
       timeoutMs: SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS,
       preferJson: true,
+      task: "selection-translation",
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "LLM selection request failed.";
 
-    if (shouldFallbackToGoogle(error instanceof LlmRequestError ? error.status ?? 0 : 0, message)) {
+    if (
+      error instanceof LlmProviderFormatError
+      || shouldFallbackToGoogle(getLlmRequestStatus(error), message)
+    ) {
       throw new TranslatorFallbackError(message);
     }
 
