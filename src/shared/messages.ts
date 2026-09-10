@@ -20,6 +20,16 @@ export interface LookupWordMessage {
   };
 }
 
+export interface LookupLexicalMetadataMessage {
+  type: "LOOKUP_LEXICAL_METADATA";
+  payload: {
+    surface: string;
+    contextText?: string;
+    partOfSpeech?: string;
+    primaryTranslation?: string;
+  };
+}
+
 export interface SetWordMasteredMessage {
   type: "SET_WORD_MASTERED";
   payload: {
@@ -127,6 +137,7 @@ export interface LookupPronunciationMessage {
 
 export type RuntimeMessage =
   | LookupWordMessage
+  | LookupLexicalMetadataMessage
   | SetWordMasteredMessage
   | SetWordUnmasteredMessage
   | SetWordIgnoredMessage
@@ -146,6 +157,14 @@ export type RuntimeMessage =
 export interface LookupWordResponse {
   ok: boolean;
   result?: LexiconLookupResult;
+  error?: string;
+}
+
+export interface LexicalMetadataResponse {
+  ok: boolean;
+  result?: Pick<LexiconLookupResult,
+    "lexicalLemma" | "wordFormLabel" | "contextualPartOfSpeech" | "semanticHint" | "alternativeMeanings"
+  >;
   error?: string;
 }
 

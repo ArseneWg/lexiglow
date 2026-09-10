@@ -142,3 +142,46 @@ test("multi-word selection keeps pronunciation controls hidden", async ({ contex
   await expect(page.locator(".wordwise-primary-translation")).toBeVisible();
   await expect(page.locator(".wordwise-pronunciation")).toBeHidden();
 });
+
+test("predictions resolves both IPA chips from the packaged extended tier when Kaikki is unavailable", async ({ context, page }) => {
+  await mockGoogleTranslation(context, "预测");
+  await context.route("https://kaikki.org/dictionary/English/meaning/**", (route) =>
+    route.fulfill({ status: 503, body: "" }),
+  );
+  await serveTestPage(context, page, '<p>The model emits several <span id="target">predictions</span>.</p>');
+  await selectElementText(page, "#target");
+  await expect(page.locator(".wordwise-pronunciation")).toBeVisible();
+  await expect(page.getByLabel("播放英式发音")).toBeEnabled({ timeout: 4_000 });
+  await expect(page.getByLabel("播放美式发音")).toBeEnabled({ timeout: 4_000 });
+  const ipas = page.locator(".wordwise-pronunciation-ipa");
+  // The pinned dictionaries can differ in narrow IPA choices. What matters here is that both
+  // accent slots resolve to real IPA instead of a loading/no-data placeholder.
+  await expect(ipas.nth(0)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+  await expect(ipas.nth(1)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+});
+
+test("Measuring keeps exact human audio while displaying the local US IPA", async ({ context, page }) => {
+  await mockGoogleTranslation(context, "测量");
+  await context.route("https://kaikki.org/dictionary/English/meaning/**", async (route) => {
+    const url = route.request().url();
+    if (url.endsWith("/measuring.jsonl")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/jsonl",
+        body: JSON.stringify({ word: "measuring", pos: "verb", sounds: [
+          { tags: ["UK"], ipa: "/ˈmɛʒərɪŋ/" },
+          { tags: ["US"], mp3_url: "https://audio.test/measuring-us.wav" },
+        ] }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: "" });
+  });
+  await serveTestPage(context, page, '<p><span id="target">Measuring</span> token prediction differences is useful.</p>');
+  await selectElementText(page, "#target");
+  await expect(page.locator(".wordwise-pronunciation")).toBeVisible();
+  await expect(page.getByLabel("播放美式发音")).toBeEnabled({ timeout: 4_000 });
+  const ipas = page.locator(".wordwise-pronunciation-ipa");
+  await expect(ipas.nth(0)).not.toHaveText(/No IPA|Audio only|\/\.\.\.\//);
+  await expect(ipas.nth(1)).toHaveText("/mˈɛʒɚɪŋ/");
+});

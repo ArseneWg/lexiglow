@@ -16,6 +16,7 @@ import {
 } from "../shared/sentenceAnalysisDisplay";
 import type {
   LookupWordResponse,
+  LexicalMetadataResponse,
   PronunciationLookupResponse,
   PronunciationResponse,
   RuntimeMessage,
@@ -2961,6 +2962,7 @@ let lastMouseY = 0;
 let activeTranslationRequestId = 0;
 let activeSelectionTooltipContext: SelectedTextContext | null = null;
 let activeSelectionTranslationRequestId = 0;
+let activeLexicalMetadataRequestId = 0;
 let activeSelectionContext: SentenceSelectionContext | null = null;
 let selectionRequestId = 0;
 let tooltipSession = HIDDEN_TOOLTIP_SESSION;
@@ -3004,6 +3006,7 @@ function hideTooltip() {
   activeSelectionTooltipContext = null;
   activeTranslationRequestId += 1;
   activeSelectionTranslationRequestId += 1;
+  activeLexicalMetadataRequestId += 1;
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
   activePronunciationResult = null;
@@ -3019,6 +3022,7 @@ function cancelActiveAsyncRequests() {
   activeRequestId += 1;
   activeTranslationRequestId += 1;
   activeSelectionTranslationRequestId += 1;
+  activeLexicalMetadataRequestId += 1;
   activeSentenceAnalysisRequestId += 1;
 }
 
@@ -3068,6 +3072,66 @@ function renderLexicalMeaningDisplay(result?: Pick<LexiconLookupResult,
   tooltip.lexicalDetailsEl.dataset.visible = form || result.semanticHint || alternatives.length ? "true" : "false";
 }
 
+async function loadLexicalMetadata(
+  surface: string,
+  contextText: string,
+  partOfSpeech?: string,
+  primaryTranslation?: string,
+) {
+  const normalizedSurface = normalizeSingleEnglishWord(surface) || surface.trim();
+  if (!normalizedSurface) return;
+  activeLexicalMetadataRequestId += 1;
+  const requestId = activeLexicalMetadataRequestId;
+
+  let response: LexicalMetadataResponse;
+  try {
+    response = await runtimeSend<LexicalMetadataResponse>({
+      type: "LOOKUP_LEXICAL_METADATA",
+      payload: { surface: normalizedSurface, contextText, partOfSpeech, primaryTranslation },
+    });
+  } catch (error) {
+    if (isExtensionContextInvalidated(error)) hideTooltip();
+    return;
+  }
+
+  if (!response.ok || !response.result || requestId !== activeLexicalMetadataRequestId) return;
+  const visibleSurface = activeResult?.surface || (
+    activeSelectionTooltipContext && isSingleEnglishWord(activeSelectionTooltipContext.text)
+      ? normalizeSingleEnglishWord(activeSelectionTooltipContext.text)
+      : ""
+  );
+  if (!visibleSurface || visibleSurface.toLowerCase() !== normalizedSurface.toLowerCase()) return;
+
+  const metadata = response.result;
+  renderLexicalMeaningDisplay({
+    lemma: activeResult?.lemma || normalizedSurface,
+    lexicalLemma: metadata.lexicalLemma,
+    wordFormLabel: metadata.wordFormLabel,
+    semanticHint: metadata.semanticHint,
+    alternativeMeanings: metadata.alternativeMeanings,
+  });
+  const pos = metadata.contextualPartOfSpeech || partOfSpeech || "";
+  if (pos) {
+    tooltip.primaryTranslationPosEl.textContent = pos;
+    tooltip.primaryTranslationPosEl.dataset.visible = "true";
+    if (tooltip.wordView.dataset.layout === "word") {
+      tooltip.surfacePosEl.textContent = pos;
+      tooltip.surfacePosEl.dataset.visible = "true";
+    }
+  }
+  if (activeResult) {
+    activeResult = {
+      ...activeResult,
+      lexicalLemma: metadata.lexicalLemma || activeResult.lexicalLemma,
+      wordFormLabel: metadata.wordFormLabel || activeResult.wordFormLabel,
+      contextualPartOfSpeech: metadata.contextualPartOfSpeech || activeResult.contextualPartOfSpeech,
+      semanticHint: metadata.semanticHint || activeResult.semanticHint,
+      alternativeMeanings: metadata.alternativeMeanings || activeResult.alternativeMeanings,
+    };
+  }
+  if (activeAnchorRect) positionTooltip(activeAnchorRect);
+}
+
 function isLlmTranslationProvider(provider?: string) {
   return provider === "llm";
 }
@@ -3078,7 +3142,7 @@ function setPrimaryTranslationContent(
   provider?: string,
 ) {
   tooltip.primaryTranslationTextEl.textContent = translation ?? "";
-  const pos = isLlmTranslationProvider(provider) ? contextualPartOfSpeech ?? "" : "";
+  const pos = contextualPartOfSpeech ?? "";
   tooltip.primaryTranslationPosEl.textContent = pos;
   tooltip.primaryTranslationPosEl.dataset.visible = pos ? "true" : "false";
 }
@@ -3560,7 +3624,7 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.surfacePosEl.dataset.visible = result.partOfSpeech ? "true" : "false";
   setPrimaryTranslationContent(
     result.translation,
-    result.contextualPartOfSpeech,
+    result.contextualPartOfSpeech || result.partOfSpeech,
     result.translationProvider,
   );
   renderLexicalMeaningDisplay(result);
@@ -3753,6 +3817,7 @@ async function requestTranslation(provider: TranslationProviderChoice) {
   }
 
   const requestContext = activeContext;
+  if (provider === "llm") activeLexicalMetadataRequestId += 1;
   setDisplayedTranslationProvider(provider);
   activeTranslationRequestId += 1;
   const translationRequestId = activeTranslationRequestId;
@@ -3814,6 +3879,14 @@ async function requestTranslation(provider: TranslationProviderChoice) {
   await animateTranslationSwap(() => {
     renderTooltip(result, requestContext.rect);
   });
+  if (normalizeDisplayedTranslationProvider(result.translationProvider) === "google") {
+    void loadLexicalMetadata(
+      result.surface,
+      requestContext.contextText ?? result.surface,
+      result.partOfSpeech,
+      result.translation,
+    );
+  }
 }
 
 async function requestSelectionTranslation(
@@ -3823,6 +3896,7 @@ async function requestSelectionTranslation(
   if (!context) return;
 
   activeSelectionTooltipContext = context;
+  if (provider === "llm") activeLexicalMetadataRequestId += 1;
   setDisplayedTranslationProvider(provider);
   activeSelectionTranslationRequestId += 1;
   const translationRequestId = activeSelectionTranslationRequestId;
@@ -3909,6 +3983,13 @@ async function requestSelectionTranslation(
   await animateTranslationSwap(() => {
     renderSelectionTooltip(context, result || undefined);
   });
+  if (
+    result &&
+    isSingleEnglishWord(context.text) &&
+    normalizeDisplayedTranslationProvider(result.translationProvider) === "google"
+  ) {
+    void loadLexicalMetadata(context.text, context.contextText, undefined, result.translation);
+  }
 }
 
 async function requestTranslationForContext(

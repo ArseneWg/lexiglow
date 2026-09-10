@@ -6,6 +6,7 @@ import type {
   GetTranslatorSettingsMessage,
   GetTranslatorSettingsStateMessage,
   LookupPronunciationMessage,
+  LookupLexicalMetadataMessage,
   LookupWordMessage,
   PronunciationLookupResponse,
   PronunciationResponse,
@@ -26,7 +27,12 @@ import {
   hasEnglishVoice,
   selectVoiceForAccent,
 } from "../shared/pronunciation";
-import { describeEnglishWordForm } from "../shared/lexicalSense";
+import {
+  buildLexicalMetadataCacheKey,
+  buildStructuredLexicalMetadata,
+  describeEnglishWordForm,
+  lookupStructuredLexicalSenses,
+} from "../shared/lexicalSense";
 import { resolvePronunciation } from "../shared/pronunciationResolver";
 import {
   looksLikeContextualSpecialTerm,
@@ -88,6 +94,9 @@ const selectionTranslationCache = createMemoryCache<CacheEntry>();
 const englishExplanationCache = createMemoryCache<EnglishExplanationCacheEntry>();
 const pronunciationCache = createMemoryCache<PronunciationCacheEntry>();
 const sentenceAnalysisCache = createMemoryCache<SentenceAnalysisCacheEntry>();
+const lexicalMetadataCache = createMemoryCache<Pick<LexiconLookupResult,
+  "lexicalLemma" | "wordFormLabel" | "contextualPartOfSpeech" | "semanticHint" | "alternativeMeanings"
+>>();
 
 function clearRuntimeCaches() {
   translationCache.clear();
@@ -95,6 +104,7 @@ function clearRuntimeCaches() {
   englishExplanationCache.clear();
   pronunciationCache.clear();
   sentenceAnalysisCache.clear();
+  lexicalMetadataCache.clear();
 }
 
 function resolveFlagsWithContext(
@@ -316,6 +326,32 @@ async function getOrTranslateSelection(
   } finally {
     inFlightTranslations.delete(requestKey);
   }
+}
+
+async function handleLookupLexicalMetadata(message: LookupLexicalMetadataMessage) {
+  const surface = message.payload.surface.trim();
+  const contextText = message.payload.contextText?.trim() ?? "";
+  const partOfSpeech = message.payload.partOfSpeech?.trim() || undefined;
+  const primaryTranslation = message.payload.primaryTranslation?.trim() ?? "";
+  const translatorSettings = await getTranslatorSettings();
+  const cacheKey = buildLexicalMetadataCacheKey({
+    learnerLanguageCode: translatorSettings.learnerLanguageCode,
+    surface,
+    partOfSpeech,
+    contextText,
+    primaryTranslation,
+  });
+  const cached = lexicalMetadataCache.get(cacheKey);
+  if (cached) return cached;
+
+  const lookup = await lookupStructuredLexicalSenses(surface, {
+    contextText,
+    partOfSpeech,
+    learnerLanguageCode: translatorSettings.learnerLanguageCode,
+  });
+  const result = buildStructuredLexicalMetadata(lookup, primaryTranslation);
+  lexicalMetadataCache.set(cacheKey, result, 6 * 60 * 60 * 1000);
+  return result;
 }
 
 async function handleLookup(message: LookupWordMessage): Promise<LexiconLookupResult> {
@@ -791,6 +827,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     switch (message.type) {
       case "LOOKUP_WORD":
         sendResponse({ ok: true, result: await handleLookup(message) });
+        break;
+      case "LOOKUP_LEXICAL_METADATA":
+        sendResponse({ ok: true, result: await handleLookupLexicalMetadata(message) });
         break;
       case "TRANSLATE_WORD":
         sendResponse({ ok: true, result: await handleTranslateWord(message) });
