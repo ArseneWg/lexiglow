@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { lookupRank, resolveLookupLemma, resolveMasteryKey } from "../src/shared/lexicon";
+import {
+  lookupRank,
+  resolveLookupLemma,
+  resolveMasteryIdentity,
+  resolveMasteryKey,
+} from "../src/shared/lexicon";
 
 describe("lexicon lookup", () => {
   test("prefers an exact ranked word over a broken stem", () => {
@@ -27,6 +32,14 @@ describe("lexicon lookup", () => {
     expect(resolveMasteryKey("addition")).toBe("addition");
   });
 
+  test("covers more common regular verbs without changing derived-word behavior", () => {
+    expect(resolveMasteryKey("talked")).toBe("talk");
+    expect(resolveMasteryKey("talking")).toBe("talk");
+    expect(resolveMasteryKey("talks")).toBe("talk");
+    expect(resolveMasteryKey("supporting")).toBe("support");
+    expect(resolveMasteryKey("addition")).toBe("addition");
+  });
+
   test("does not falsely merge lexical or context-ambiguous forms", () => {
     expect(resolveMasteryKey("news")).toBe("news");
     expect(resolveMasteryKey("morning")).toBe("morning");
@@ -35,6 +48,23 @@ describe("lexicon lookup", () => {
     expect(resolveMasteryKey("saw")).toBe("saw");
     expect(resolveMasteryKey("left")).toBe("left");
     expect(resolveMasteryKey("rose")).toBe("rose");
+  });
+
+  test("explains shared, independent, and compound mastery identities", () => {
+    expect(resolveMasteryIdentity("worked", "work")).toMatchObject({
+      masteryKey: "work",
+      kind: "shared-inflection",
+    });
+    expect(resolveMasteryIdentity("saw", "see")).toMatchObject({
+      masteryKey: "saw",
+      kind: "independent-inflection",
+      lexicalLemma: "see",
+    });
+    expect(resolveMasteryIdentity("in-page", "in-page")).toMatchObject({
+      masteryKey: "in-page",
+      kind: "compound",
+      components: ["in", "page"],
+    });
   });
 
   test("uses normalized multi-word phrases as independent mastery keys", () => {
