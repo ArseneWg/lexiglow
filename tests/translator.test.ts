@@ -322,10 +322,16 @@ describe("llm provider requests", () => {
     );
     expect(payload.messages.at(-1)?.content).toContain("selected_text: preserves");
     expect(payload.chat_template_kwargs).toBeUndefined();
-    expect(payload.response_format).toBeUndefined();
+    expect(payload.response_format).toMatchObject({
+      type: "json_schema",
+      json_schema: {
+        name: "lexiglow_selection_translation",
+        strict: true,
+      },
+    });
   });
 
-  test("disables thinking for qwen3 openai-compatible requests", async () => {
+  test("keeps generic qwen endpoints vendor-neutral and capability-driven", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -358,13 +364,13 @@ describe("llm provider requests", () => {
     const payload = JSON.parse(String(request.body)) as {
       model: string;
       chat_template_kwargs?: { enable_thinking?: boolean };
+      response_format?: { type?: string };
     };
 
     expect(url).toBe("https://gpustack.rock-chips.com/v1/chat/completions");
     expect(payload.model).toBe("qwen3.5-397b-a17b");
-    expect(payload.chat_template_kwargs).toEqual({
-      enable_thinking: false,
-    });
+    expect(payload.chat_template_kwargs).toBeUndefined();
+    expect(payload.response_format?.type).toBe("json_schema");
   });
 
   test("formats gemini selection translation requests", async () => {

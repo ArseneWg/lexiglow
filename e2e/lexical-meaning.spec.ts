@@ -29,8 +29,14 @@ test("single-word selection uses the lexical pipeline and renders sense metadata
       ? JSON.stringify({ word: "collapses", pos: "verb", senses: [{ tags: ["form-of"], form_of: [{ word: "collapse" }], glosses: ["third-person singular of collapse"] }] })
       : url.endsWith("/collapse.jsonl")
         ? JSON.stringify({ word: "collapse", pos: "verb", senses: [
-            { glosses: ["to fail completely, as a system or organization"] },
-            { glosses: ["to fall down suddenly, as a building or structure"] },
+            {
+              glosses: ["to fail completely, as a system or organization"],
+              translations: [{ lang_code: "zh", word: "瓦解" }],
+            },
+            {
+              glosses: ["to fall down suddenly, as a building or structure"],
+              translations: [{ lang_code: "zh", word: "倒塌" }],
+            },
           ] })
         : "";
     await route.fulfill({ status: body ? 200 : 404, contentType: "application/jsonl", body });
@@ -45,10 +51,6 @@ test("single-word selection uses the lexical pipeline and renders sense metadata
         word: "瓦解",
         pos: "verb",
         hint: "系统或机制突然失效",
-        alternatives: [
-          { meaning: "倒塌", hint: "建筑物或结构", pos: "verb" },
-          { meaning: "倒下", hint: "人因虚弱或疾病", pos: "verb" },
-        ],
       })),
     });
   });
@@ -60,5 +62,5 @@ test("single-word selection uses the lexical pipeline and renders sense metadata
   await expect(page.locator(".wordwise-semantic-hint")).toContainText("系统或机制突然失效");
   await page.locator(".wordwise-other-meanings summary").click();
   await expect(page.locator(".wordwise-other-meanings-list")).toContainText("倒塌");
-  await expect(page.locator(".wordwise-other-meanings-list")).toContainText("建筑物或结构");
+  await expect(page.locator(".wordwise-other-meanings-list")).toContainText("fall down suddenly");
 });

@@ -150,7 +150,7 @@ test("a user can switch the same lookup from Google to contextual LLM and back",
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: openAiResponse({ word: "语境译文", pos: "noun" }),
+      body: openAiResponse({ word: "语境译文", pos: "noun", hint: "当前语境中的含义" }),
     });
   });
 

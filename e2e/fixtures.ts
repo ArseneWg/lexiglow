@@ -37,7 +37,8 @@ export async function launchExtensionContext(
 
 export const test = base.extend<ExtensionFixtures>({
   extensionPath: async ({}, use) => {
-    await use(path.resolve(process.cwd()));
+    const configuredPath = process.env.LEXIGLOW_EXTENSION_PATH?.trim();
+    await use(configuredPath ? path.resolve(configuredPath) : path.resolve(process.cwd()));
   },
 
   userDataDir: async ({}, use) => {
