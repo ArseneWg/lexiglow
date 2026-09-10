@@ -106,7 +106,14 @@ test("hyphenated compounds are highlighted and translated as one lexical unit", 
 
   await page.locator("#compound").hover();
   await expect(page.locator(".wordwise-primary-translation")).toContainText("混合精度");
+  await expect(page.locator(".wordwise-word-form")).toContainText("components: mixed + precision");
   expect(translatedSource).toBe("mixed-precision");
+
+  await page.getByRole("button", { name: "已掌握", exact: true }).click();
+  const settings = await readUserSettings(extensionWorker);
+  expect(settings?.masteredOverrides).toContain("mixed-precision");
+  expect(settings?.masteredOverrides).not.toContain("mixed");
+  expect(settings?.masteredOverrides).not.toContain("precision");
 });
 
 test("explicitly selected Title Case phrases are translated instead of silently preserved", async ({
