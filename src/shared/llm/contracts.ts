@@ -6,7 +6,7 @@ export type LlmTaskKind =
   | "english-explanation"
   | "sentence-analysis";
 
-export type LlmTaskReasoning = "off" | "low" | "high";
+export type LlmTaskReasoning = "off" | "low" | "high" | "max";
 export type OpenAiCompatibilityPreset = "openai" | "deepseek" | "custom";
 export type StructuredOutputMode = "json-schema" | "json-object" | "prompt-json";
 
@@ -33,6 +33,7 @@ export interface OpenAiCompatibleTaskRequest {
   userPrompt: string;
   maxTokens: number;
   timeoutMs: number;
+  reasoning?: LlmTaskReasoning;
 }
 
 export interface OpenAiCompatibleTaskResponse {

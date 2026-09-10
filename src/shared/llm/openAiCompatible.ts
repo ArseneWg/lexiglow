@@ -172,6 +172,7 @@ function buildBody(
   mode: StructuredOutputMode,
 ): Record<string, unknown> {
   const contract = getLlmTaskContract(request.task);
+  const reasoning = request.reasoning ?? contract.reasoning;
   const systemPrompt = mode === "json-schema"
     ? request.systemPrompt
     : `${request.systemPrompt}\nReturn valid JSON only. JSON example: ${JSON.stringify(contract.example)}`;
@@ -205,11 +206,11 @@ function buildBody(
   }
 
   if (request.connection.preset === "deepseek") {
-    if (contract.reasoning === "off") {
+    if (reasoning === "off") {
       body.thinking = { type: "disabled" };
     } else {
       body.thinking = { type: "enabled" };
-      body.reasoning_effort = contract.reasoning === "high" ? "high" : "low";
+      body.reasoning_effort = reasoning === "max" ? "max" : reasoning === "high" ? "high" : "low";
     }
   }
 

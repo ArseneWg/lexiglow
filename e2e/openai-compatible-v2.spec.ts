@@ -36,6 +36,48 @@ async function translateWordThroughRuntime(
   }
 }
 
+async function translateSelectionThroughRuntime(
+  context: Parameters<typeof test>[0] extends never ? never : any,
+  extensionId: string,
+  text: string,
+) {
+  const extensionPage = await context.newPage();
+  await extensionPage.goto(`chrome-extension://${extensionId}/dist/options.html`);
+  try {
+    return await extensionPage.evaluate(async (selection) => {
+      return chrome.runtime.sendMessage({
+        type: "TRANSLATE_SELECTION",
+        payload: {
+          text: selection,
+          contextText: selection,
+          provider: "llm",
+        },
+      });
+    }, text);
+  } finally {
+    await extensionPage.close();
+  }
+}
+
+async function analyzeSentenceThroughRuntime(
+  context: Parameters<typeof test>[0] extends never ? never : any,
+  extensionId: string,
+  text: string,
+) {
+  const extensionPage = await context.newPage();
+  await extensionPage.goto(`chrome-extension://${extensionId}/dist/options.html`);
+  try {
+    return await extensionPage.evaluate(async (sentence) => {
+      return chrome.runtime.sendMessage({
+        type: "ANALYZE_SELECTION",
+        payload: { text: sentence },
+      });
+    }, text);
+  } finally {
+    await extensionPage.close();
+  }
+}
+
 test.beforeEach(async ({ context, extensionWorker }) => {
   await clearExtensionStorage(extensionWorker);
   await mockDictionaryFailures(context);
@@ -103,6 +145,119 @@ test("DeepSeek quick translation uses JSON mode with thinking disabled without a
   const messages = body.messages as Array<{ role: string; content: string }>;
   expect(messages[0]?.content).toContain("JSON example");
   expect(authorization).toBe("Bearer e2e-deepseek-key");
+  expect((await getHighlightTexts(page)).includes("predictions")).toBe(true);
+});
+
+test("long DeepSeek selection translation receives a dynamic output budget", async ({
+  context,
+  page,
+  extensionWorker,
+  extensionId,
+}) => {
+  await seedUserSettings(extensionWorker, { knownBaseRank: 0 });
+  await seedTranslatorSettings(extensionWorker, {
+    defaultTranslationProvider: "llm",
+    llmProvider: "openai",
+    providerBaseUrl: "https://api.deepseek.com",
+    providerModel: "deepseek-v4-flash",
+    apiKey: "e2e-deepseek-key",
+    fallbackToGoogle: false,
+  });
+
+  let maxTokens = 0;
+  await context.route("https://api.deepseek.com/**", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    maxTokens = Number(body.max_tokens ?? 0);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: openAiResponse({ word: "这是一段完整的长句翻译" }),
+    });
+  });
+
+  await serveTestPage(
+    context,
+    page,
+    '<p>The model makes <span id="target">predictions</span> about future demand.</p>',
+  );
+  await expect.poll(async () => (await getHighlightTexts(page)).includes("predictions")).toBe(true);
+
+  const longText = "A technically dense sentence with multiple dependent clauses and detailed qualifications. ".repeat(8);
+  const runtimeResponse = await translateSelectionThroughRuntime(
+    context,
+    extensionId,
+    longText,
+  ) as { ok?: boolean; result?: { translation?: string } };
+
+  expect(runtimeResponse.ok).toBe(true);
+  expect(runtimeResponse.result?.translation).toContain("完整的长句翻译");
+  expect(maxTokens).toBeGreaterThan(180);
+  expect((await getHighlightTexts(page)).includes("predictions")).toBe(true);
+});
+
+test("DeepSeek analysis retries empty JSON with higher reasoning without damaging highlights", async ({
+  context,
+  page,
+  extensionWorker,
+  extensionId,
+}) => {
+  await seedUserSettings(extensionWorker, { knownBaseRank: 0 });
+  await seedTranslatorSettings(extensionWorker, {
+    defaultTranslationProvider: "llm",
+    llmProvider: "openai",
+    providerBaseUrl: "https://api.deepseek.com",
+    providerModel: "deepseek-v4-flash",
+    apiKey: "e2e-deepseek-key",
+    fallbackToGoogle: false,
+  });
+
+  const bodies: Array<Record<string, unknown>> = [];
+  await context.route("https://api.deepseek.com/**", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    bodies.push(body);
+    if (bodies.length === 1) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "" } }] }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: openAiResponse({
+        translation: "尽管实验失败，团队仍决定继续，因为证据仍然有用。",
+        structure: "the team decided to continue",
+        analysisSteps: ["一", "二", "三", "四"],
+        highlights: [
+          { category: "conjunction", text: "Although", tokenIndex: 0 },
+          { category: "subject", text: "team", tokenIndex: 5 },
+          { category: "predicate", text: "decided", tokenIndex: 7 },
+        ],
+        clauseBlocks: [
+          "subordinate|||Although the experiment failed,",
+          "main|||the team still decided to continue",
+          "subordinate|||because the evidence remained useful.",
+        ],
+      }),
+    });
+  });
+
+  const sentence = "Although the experiment failed, the team still decided to continue because the evidence remained useful.";
+  await serveTestPage(context, page, '<p>The model makes <span id="target">predictions</span> about future demand.</p>');
+  await expect.poll(async () => (await getHighlightTexts(page)).includes("predictions")).toBe(true);
+
+  const runtimeResponse = await analyzeSentenceThroughRuntime(context, extensionId, sentence) as {
+    ok?: boolean;
+    result?: { translation?: string };
+  };
+  expect(runtimeResponse.ok).toBe(true);
+  expect(runtimeResponse.result?.translation).toContain("团队");
+  expect(bodies).toHaveLength(2);
+  expect(bodies[0].reasoning_effort).toBe("low");
+  expect(bodies[1].reasoning_effort).toBe("high");
+  expect(Number(bodies[1].max_tokens)).toBeGreaterThan(Number(bodies[0].max_tokens));
   expect((await getHighlightTexts(page)).includes("predictions")).toBe(true);
 });
 

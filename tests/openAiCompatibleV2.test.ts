@@ -6,7 +6,9 @@ import {
   resolveOpenAiCompatibilityPreset,
 } from "../src/shared/llm/openAiCompatible";
 import {
+  analyzeSentenceWithLlm,
   sanitizeTranslatorSettings,
+  translateSelectionWithLlm,
   translateWithLlm,
 } from "../src/shared/translator";
 
@@ -268,6 +270,110 @@ describe("OpenAI-compatible v2", () => {
         timeoutMs: 5000,
       })).rejects.toThrow(/task contract/i);
     }
+  });
+
+  test("long DeepSeek selection translation expands the visible output budget", async () => {
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return http(completion('{"word":"长句译文"}'));
+    }));
+
+    const text = "A technically dense sentence with multiple dependent clauses and detailed qualifications. ".repeat(8);
+    const result = await translateSelectionWithLlm({
+      text,
+      contextText: text,
+      settings: sanitizeTranslatorSettings({
+        llmProvider: "openai",
+        providerBaseUrl: "https://api.deepseek.com",
+        providerModel: "deepseek-v4-flash",
+        apiKey: "dummy",
+        learnerLanguageCode: "zh-CN",
+      }),
+    });
+
+    expect(result.translation).toBe("长句译文");
+    expect(Number(body.max_tokens)).toBeGreaterThan(180);
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
+  test("DeepSeek sentence analysis uses high reasoning for complex sentences", async () => {
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return http(completion(JSON.stringify({
+        translation: "完整译文",
+        structure: "Researchers found evidence.",
+        analysisSteps: ["一", "二", "三", "四"],
+        highlights: [
+          { category: "subject", text: "researchers", tokenIndex: 4 },
+          { category: "predicate", text: "found", tokenIndex: 7 },
+          { category: "conjunction", text: "Although", tokenIndex: 0 },
+        ],
+        clauseBlocks: [
+          "subordinate|||Although the initial measurements appeared inconsistent,",
+          "main|||the researchers who repeated the experiment carefully found that the underlying pattern remained stable,",
+          "subordinate|||because the apparent discrepancy was caused by a calibration issue rather than a failure of the model.",
+        ],
+      })));
+    }));
+
+    const sentence = "Although the initial measurements appeared inconsistent, the researchers who repeated the experiment carefully found that the underlying pattern remained stable, because the apparent discrepancy was caused by a calibration issue rather than a failure of the model.";
+    await analyzeSentenceWithLlm({
+      text: sentence,
+      settings: sanitizeTranslatorSettings({
+        llmProvider: "openai",
+        providerBaseUrl: "https://api.deepseek.com",
+        providerModel: "deepseek-v4-flash",
+        apiKey: "dummy",
+        learnerLanguageCode: "zh-CN",
+      }),
+    });
+
+    expect(body.thinking).toEqual({ type: "enabled" });
+    expect(body.reasoning_effort).toBe("high");
+    expect(Number(body.max_tokens)).toBeGreaterThanOrEqual(6000);
+  });
+
+  test("empty DeepSeek analysis output retries once with higher reasoning and budget", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      if (bodies.length === 1) return http(completion(""));
+      return http(completion(JSON.stringify({
+        translation: "尽管实验失败，团队仍决定继续，因为证据仍然有用。",
+        structure: "the team decided to continue",
+        analysisSteps: ["一", "二", "三", "四"],
+        highlights: [
+          { category: "conjunction", text: "Although", tokenIndex: 0 },
+          { category: "subject", text: "team", tokenIndex: 5 },
+          { category: "predicate", text: "decided", tokenIndex: 7 },
+        ],
+        clauseBlocks: [
+          "subordinate|||Although the experiment failed,",
+          "main|||the team still decided to continue",
+          "subordinate|||because the evidence remained useful.",
+        ],
+      })));
+    }));
+
+    const result = await analyzeSentenceWithLlm({
+      text: "Although the experiment failed, the team still decided to continue because the evidence remained useful.",
+      settings: sanitizeTranslatorSettings({
+        llmProvider: "openai",
+        providerBaseUrl: "https://api.deepseek.com",
+        providerModel: "deepseek-v4-flash",
+        apiKey: "dummy",
+        learnerLanguageCode: "zh-CN",
+      }),
+    });
+
+    expect(result.translation).toContain("团队");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0].reasoning_effort).toBe("low");
+    expect(bodies[1].reasoning_effort).toBe("high");
+    expect(Number(bodies[1].max_tokens)).toBeGreaterThan(Number(bodies[0].max_tokens));
   });
 
   test("truncated or malformed structured output fails closed", async () => {
