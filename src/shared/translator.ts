@@ -3,9 +3,21 @@ import { lookupRank, resolveLookupLemma } from "./lexicon";
 import { countTotalKnown, estimateLearnerLevel, resolveWordFlags } from "./settings";
 import { createEnglishTokenMatcher } from "./word";
 import {
+  buildStructuredLexicalMetadata,
   formatStructuredSensesForPrompt,
   lookupStructuredLexicalSenses,
 } from "./lexicalSense";
+import {
+  legacyOpenAiConnectionFromSettings,
+  requestOpenAiCompatibleTask,
+  resolveOpenAiCompatibilityPreset,
+} from "./llm/openAiCompatible";
+import {
+  LlmProviderFormatError,
+  LlmProviderRequestError,
+  type LlmTaskKind,
+  type LlmTaskReasoning,
+} from "./llm/contracts";
 import type {
   EnglishExplanationResult,
   LearnerLevelBand,
@@ -91,6 +103,21 @@ const LLM_PROVIDER_DEFAULTS = {
 const WORD_TRANSLATION_REQUEST_TIMEOUT_MS = 8000;
 const SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS = 10000;
 const SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 25000;
+const LONG_SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS = 18000;
+const COMPLEX_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 45000;
+const RETRY_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 60000;
+
+function selectionTranslationMaxTokens(text: string): number {
+  const wordCount = text.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g)?.length ?? 0;
+  const estimatedOutput = Math.max(180, Math.ceil(text.length * 0.9), wordCount * 4 + 96);
+  return Math.min(1600, estimatedOutput);
+}
+
+function selectionTranslationTimeoutMs(text: string): number {
+  if (text.length > 500) return LONG_SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS;
+  if (text.length > 220) return 14000;
+  return SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS;
+}
 const PRESERVE_PROPER_NAMES_INSTRUCTION =
   "Keep person names, usernames, brand names, and product names in their original English form instead of translating or transliterating them.";
 
@@ -154,7 +181,7 @@ function buildWordTranslationSystemPrompt(
 
   const senseInstruction =
     "Use the dictionary_senses supplied in the user message as anchors when they fit the sentence, but do not force a listed sense when the context clearly uses a newer technical or domain-specific meaning. " +
-    "Choose one exact contextual meaning. Return a short semantic hint describing the usage domain or object type, and at most three other common meanings that are genuinely distinct and useful to a learner. Exclude obscure, obsolete, or duplicate senses. ";
+    "Choose one exact contextual meaning and return a short semantic hint describing the usage domain or object type. Alternative meanings are handled separately from structured dictionary data; do not enumerate them. ";
 
   if (mode === "english") {
     return (
@@ -167,7 +194,7 @@ function buildWordTranslationSystemPrompt(
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
       "Use simple, common English. Avoid advanced synonyms, long clauses, and dictionary jargon. " +
       "Avoid using the target word or its inflections in the explanation unless absolutely necessary. " +
-      'Return strict JSON only: {"word":"<precise meaning in the learner language>","english":"<one short easy English sentence>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in the learner language>","alternatives":[{"meaning":"<other common meaning in learner language>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown or extra text.'
+      'Return strict JSON only: {"word":"<precise meaning in the learner language>","english":"<one short easy English sentence>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in the learner language>"}. No markdown or extra text.'
     );
   }
 
@@ -177,7 +204,7 @@ function buildWordTranslationSystemPrompt(
       "Translate the target English word or short phrase based on the sentence context. " +
       `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
       "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
-      `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","sentence":"<full sentence translation in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>","alternatives":[{"meaning":"<other common meaning in ${meaningLanguage}>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown, no explanation.`
+      `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","sentence":"<full sentence translation in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>"}. No markdown, no explanation.`
     );
   }
 
@@ -186,7 +213,7 @@ function buildWordTranslationSystemPrompt(
     "Translate the target English word or short phrase based on the sentence context. " +
     `${PRESERVE_PROPER_NAMES_INSTRUCTION} ` +
     "Also identify the single best part of speech in this sentence using one of: noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, auxiliary, phrase. " +
-    `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>","alternatives":[{"meaning":"<other common meaning in ${meaningLanguage}>","hint":"<when/where this meaning is used>","pos":"<part of speech>"}]}. No markdown or extra text.`
+    `Return strict JSON only: {"word":"<concise meaning in ${meaningLanguage}>","pos":"<single best part of speech in context>","hint":"<short usage/domain hint in ${meaningLanguage}>"}. No markdown or extra text.`
   );
 }
 
@@ -425,10 +452,6 @@ function resolveLlmEndpoint(settings: TranslatorSettings): string {
   }
 }
 
-function shouldDisableOpenAiCompatibleThinking(settings: TranslatorSettings): boolean {
-  return settings.llmProvider === "openai" && settings.providerModel.trim().toLowerCase().includes("qwen3");
-}
-
 async function requestLlmText({
   settings,
   systemPrompt,
@@ -437,6 +460,8 @@ async function requestLlmText({
   maxTokens,
   timeoutMs,
   preferJson,
+  task,
+  reasoning,
 }: {
   settings: TranslatorSettings;
   systemPrompt: string;
@@ -445,7 +470,30 @@ async function requestLlmText({
   maxTokens: number;
   timeoutMs: number;
   preferJson?: boolean;
+  task?: LlmTaskKind;
+  reasoning?: LlmTaskReasoning;
 }): Promise<{ content: string; finishReason: string; payload: unknown; response: Response }> {
+  if (settings.llmProvider === "openai") {
+    if (!preferJson || !task) {
+      throw new LlmProviderFormatError("OpenAI-compatible v2 requires an explicit structured task contract.");
+    }
+    const result = await requestOpenAiCompatibleTask({
+      connection: legacyOpenAiConnectionFromSettings(settings),
+      task,
+      systemPrompt,
+      userPrompt,
+      maxTokens,
+      timeoutMs,
+      reasoning,
+    });
+    return {
+      content: result.content,
+      finishReason: result.finishReason,
+      payload: result.payload,
+      response: result.response,
+    };
+  }
+
   const endpoint = resolveLlmEndpoint(settings);
 
   let init: RequestInit;
@@ -498,38 +546,6 @@ async function requestLlmText({
         }),
       };
       break;
-    case "openai":
-      const openAiCompatibleRequestBody: Record<string, unknown> = {
-        model: settings.providerModel,
-        temperature,
-        max_tokens: maxTokens,
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          {
-            role: "user",
-            content: userPrompt,
-          },
-        ],
-      };
-
-      if (shouldDisableOpenAiCompatibleThinking(settings)) {
-        openAiCompatibleRequestBody.chat_template_kwargs = {
-          enable_thinking: false,
-        };
-      }
-
-      init = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(settings.apiKey.trim() ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
-        },
-        body: JSON.stringify(openAiCompatibleRequestBody),
-      };
-      break;
   }
 
   const response = await fetchWithTimeout(endpoint, init, timeoutMs);
@@ -555,13 +571,6 @@ async function requestLlmText({
         payload,
         response,
       };
-    case "openai":
-      return {
-        content: readOpenAiContent(payload),
-        finishReason: readOpenAiFinishReason(payload),
-        payload,
-        response,
-      };
   }
 }
 
@@ -573,6 +582,13 @@ function requiresLlmApiKey(settings: TranslatorSettings): boolean {
   } catch {
     return true;
   }
+}
+
+function getLlmRequestStatus(error: unknown): number {
+  if (error instanceof LlmRequestError || error instanceof LlmProviderRequestError) {
+    return error.status ?? 0;
+  }
+  return 0;
 }
 
 function shouldFallbackToGoogle(status: number, message: string): boolean {
@@ -1055,13 +1071,15 @@ class SentenceAnalysisRequestError extends Error {
   status?: number;
   responseText?: string;
   stage?: string;
+  retryable: boolean;
 
-  constructor(message: string, options?: { status?: number; responseText?: string; stage?: string }) {
+  constructor(message: string, options?: { status?: number; responseText?: string; stage?: string; retryable?: boolean }) {
     super(message);
     this.name = "SentenceAnalysisRequestError";
     this.status = options?.status;
     this.responseText = options?.responseText;
     this.stage = options?.stage;
+    this.retryable = options?.retryable ?? false;
   }
 }
 
@@ -1262,6 +1280,58 @@ function sentenceAnalysisNeedsRetry(
   return wordCount > 12 && categories.size < 2;
 }
 
+interface SentenceAnalysisExecutionPolicy {
+  reasoning?: LlmTaskReasoning;
+  maxTokens: number;
+  timeoutMs: number;
+}
+
+function sentenceAnalysisExecutionPolicy(
+  settings: TranslatorSettings,
+  sentence: string,
+  qualityRetry: boolean,
+): SentenceAnalysisExecutionPolicy {
+  const wordCount = tokenizeSentenceForAnalysis(sentence).length;
+  const clauseMarkers = sentence.match(/\b(?:although|though|whereas|while|because|since|if|unless|when|whenever|which|who|whom|whose|where|whether|and|but|yet)\b/gi)?.length ?? 0;
+  const punctuation = sentence.match(/[,;:—()]/g)?.length ?? 0;
+  const complex = wordCount >= 24
+    || sentence.length >= 180
+    || clauseMarkers >= 3
+    || (wordCount >= 16 && punctuation >= 2);
+  const isDeepSeek = settings.llmProvider === "openai"
+    && resolveOpenAiCompatibilityPreset(settings.providerBaseUrl) === "deepseek";
+
+  if (isDeepSeek) {
+    if (qualityRetry) {
+      return {
+        reasoning: "high",
+        maxTokens: complex ? 8000 : 6000,
+        timeoutMs: RETRY_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS,
+      };
+    }
+    return {
+      reasoning: complex ? "high" : "low",
+      maxTokens: complex ? 6000 : 3200,
+      timeoutMs: complex
+        ? COMPLEX_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS
+        : 30000,
+    };
+  }
+
+  return {
+    maxTokens: qualityRetry ? 4800 : complex ? 3600 : 2400,
+    timeoutMs: qualityRetry
+      ? RETRY_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS
+      : complex
+        ? COMPLEX_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS
+        : SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS,
+  };
+}
+
+function shouldRetrySentenceAnalysisError(error: unknown): boolean {
+  return error instanceof SentenceAnalysisRequestError && error.retryable;
+}
+
 async function requestSentenceAnalysis({
   settings,
   sentence,
@@ -1276,8 +1346,9 @@ async function requestSentenceAnalysis({
   const tokens = tokenizeSentenceForAnalysis(sentence);
   const tokenList = tokens.map((token) => `${token.index}:${token.text}`).join(" ");
   const retryInstruction = qualityRetry
-    ? "\nquality_retry: The previous attempt failed structural validation. Cover the entire source with exact clauseBlocks and use exact tokenIndex values for every highlight."
+    ? "\nquality_retry: The previous attempt was incomplete, truncated, empty, or failed structural validation. Return one complete JSON object. Cover the entire source with exact clauseBlocks and use exact tokenIndex values for every highlight. Do not omit required fields."
     : "";
+  const policy = sentenceAnalysisExecutionPolicy(settings, sentence, qualityRetry);
   let llmResult: { content: string; finishReason: string; payload: unknown; response: Response };
 
   try {
@@ -1286,21 +1357,23 @@ async function requestSentenceAnalysis({
       systemPrompt,
       userPrompt: `sentence: ${sentence}\ntokens: ${tokenList}${retryInstruction}`,
       temperature: qualityRetry ? 0 : 0.1,
-      maxTokens: 1600,
-      timeoutMs: SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS,
+      maxTokens: policy.maxTokens,
+      timeoutMs: policy.timeoutMs,
       preferJson: true,
+      task: "sentence-analysis",
+      reasoning: policy.reasoning,
     });
   } catch (error) {
     throw new SentenceAnalysisRequestError(
       error instanceof Error ? error.message : "LLM analysis request failed.",
-      { status: error instanceof LlmRequestError ? error.status : undefined, responseText: "", stage: qualityRetry ? "quality-retry" : "single-shot" },
+      { status: getLlmRequestStatus(error) || undefined, responseText: "", stage: qualityRetry ? "quality-retry" : "single-shot", retryable: error instanceof LlmProviderFormatError },
     );
   }
 
   const { content, finishReason, response } = llmResult;
   if (isMaxTokenFinishReason(finishReason)) {
     throw new SentenceAnalysisRequestError("Sentence analysis response was truncated by max tokens.", {
-      status: response.status, responseText: content.slice(0, 1600), stage: qualityRetry ? "quality-retry" : "single-shot",
+      status: response.status, responseText: content.slice(0, 1600), stage: qualityRetry ? "quality-retry" : "single-shot", retryable: true,
     });
   }
 
@@ -1309,7 +1382,7 @@ async function requestSentenceAnalysis({
   } catch (error) {
     throw new SentenceAnalysisRequestError(
       error instanceof Error ? error.message : "Sentence analysis parsing failed.",
-      { status: response.status, responseText: content.slice(0, 1600), stage: qualityRetry ? "quality-retry" : "single-shot" },
+      { status: response.status, responseText: content.slice(0, 1600), stage: qualityRetry ? "quality-retry" : "single-shot", retryable: true },
     );
   }
 }
@@ -1413,6 +1486,7 @@ async function requestEnglishExplanation({
     maxTokens: 140,
     timeoutMs: WORD_TRANSLATION_REQUEST_TIMEOUT_MS,
     preferJson: true,
+    task: "english-explanation",
   });
 
   return parseEnglishExplanationResponse(content);
@@ -1506,11 +1580,19 @@ export async function translateWithLlm({
       maxTokens: needsEnglishExplanation ? 240 : needsSentence ? 220 : 180,
       timeoutMs: WORD_TRANSLATION_REQUEST_TIMEOUT_MS,
       preferJson: true,
+      task: mode === "sentence"
+        ? "contextual-word-sentence"
+        : mode === "english"
+          ? "contextual-word-english"
+          : "contextual-word",
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "LLM request failed.";
 
-    if (shouldFallbackToGoogle(error instanceof LlmRequestError ? error.status ?? 0 : 0, message)) {
+    if (
+      error instanceof LlmProviderFormatError
+      || shouldFallbackToGoogle(getLlmRequestStatus(error), message)
+    ) {
       throw new TranslatorFallbackError(message);
     }
 
@@ -1550,15 +1632,21 @@ export async function translateWithLlm({
     throw new TranslatorFallbackError("LLM translation response was empty.");
   }
 
+  const structuredMetadata = buildStructuredLexicalMetadata(
+    structuredLexicon,
+    parsed.translation,
+  );
+
   return {
     translation: parsed.translation,
     sentenceTranslation: parsed.sentenceTranslation,
     englishExplanation: parsed.englishExplanation,
-    contextualPartOfSpeech: parsed.contextualPartOfSpeech,
-    lexicalLemma: structuredLexicon.lemma || undefined,
-    wordFormLabel: structuredLexicon.wordFormLabel,
-    semanticHint: parsed.semanticHint,
-    alternativeMeanings: parsed.alternativeMeanings,
+    contextualPartOfSpeech:
+      parsed.contextualPartOfSpeech || structuredMetadata.contextualPartOfSpeech,
+    lexicalLemma: structuredMetadata.lexicalLemma,
+    wordFormLabel: structuredMetadata.wordFormLabel,
+    semanticHint: parsed.semanticHint || structuredMetadata.semanticHint,
+    alternativeMeanings: structuredMetadata.alternativeMeanings,
     provider: getLlmProviderTag(),
     cached: false,
   };
@@ -1587,14 +1675,18 @@ export async function translateSelectionWithLlm({
       systemPrompt: buildSelectionTranslationSystemPrompt(settings),
       userPrompt: `selected_text: ${selection}\ncontext: ${context}`,
       temperature: 0,
-      maxTokens: 180,
-      timeoutMs: SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS,
+      maxTokens: selectionTranslationMaxTokens(selection),
+      timeoutMs: selectionTranslationTimeoutMs(selection),
       preferJson: true,
+      task: "selection-translation",
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "LLM selection request failed.";
 
-    if (shouldFallbackToGoogle(error instanceof LlmRequestError ? error.status ?? 0 : 0, message)) {
+    if (
+      error instanceof LlmProviderFormatError
+      || shouldFallbackToGoogle(getLlmRequestStatus(error), message)
+    ) {
       throw new TranslatorFallbackError(message);
     }
 
@@ -1629,15 +1721,31 @@ export async function analyzeSentenceWithLlm({
   const analysisPrompt = buildSentenceAnalysisPrompt(settings);
 
   try {
-    let result = await requestSentenceAnalysis({ settings, sentence, systemPrompt: analysisPrompt });
-    if (sentenceAnalysisNeedsRetry(result, sentence)) {
-      const retry = await requestSentenceAnalysis({
+    let usedQualityRetry = false;
+    let result: Omit<SentenceAnalysisResult, "provider" | "cached">;
+
+    try {
+      result = await requestSentenceAnalysis({ settings, sentence, systemPrompt: analysisPrompt });
+    } catch (error) {
+      if (!shouldRetrySentenceAnalysisError(error)) throw error;
+      usedQualityRetry = true;
+      result = await requestSentenceAnalysis({
         settings, sentence, systemPrompt: analysisPrompt, qualityRetry: true,
       });
-      if (sentenceAnalysisNeedsRetry(retry, sentence)) {
-        throw new SentenceAnalysisFormatError("Sentence analysis failed structural quality validation.");
+    }
+
+    if (sentenceAnalysisNeedsRetry(result, sentence)) {
+      if (usedQualityRetry) {
+        throw new SentenceAnalysisFormatError("Sentence analysis failed structural quality validation after retry.");
       }
-      result = retry;
+      usedQualityRetry = true;
+      result = await requestSentenceAnalysis({
+        settings, sentence, systemPrompt: analysisPrompt, qualityRetry: true,
+      });
+    }
+
+    if (sentenceAnalysisNeedsRetry(result, sentence)) {
+      throw new SentenceAnalysisFormatError("Sentence analysis failed structural quality validation after retry.");
     }
 
     return { ...result, provider: getLlmProviderTag(), cached: false };
