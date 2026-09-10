@@ -1,6 +1,7 @@
 import { WORDS } from "../generated/lexicon";
 import { getLemmaCandidates } from "./normalize";
 import { normalizePhraseKey } from "./phrases";
+import { getHyphenatedCompoundComponents } from "./word";
 
 const RANK_MAP = new Map<string, number>();
 
@@ -44,12 +45,19 @@ const SAFE_IRREGULAR_MASTERY: Readonly<Record<string, string>> = {
   farther: "far", farthest: "far", further: "far", furthest: "far",
 };
 
+// These bases are explicit high-confidence overrides for common regular verbs.
+// The resolver below still handles regular morphology generically from spelling
+// candidates and frequency evidence, so vocabulary outside this list can share
+// mastery when the evidence is strong enough.
 const SAFE_REGULAR_BASES = [
-  "add", "allow", "analyze", "apply", "ask", "call", "change", "check", "close",
-  "compare", "continue", "create", "develop", "explain", "fetch", "focus", "help",
-  "highlight", "ignore", "include", "learn", "load", "look", "mark", "move", "need",
-  "open", "play", "provide", "read", "receive", "remember", "review", "save", "select",
-  "show", "start", "stop", "test", "translate", "update", "use", "walk", "work",
+  "accept", "achieve", "add", "allow", "analyze", "apply", "ask", "call", "change",
+  "check", "close", "compare", "consider", "continue", "create", "decide", "describe",
+  "develop", "discover", "explain", "expect", "fetch", "focus", "follow", "help",
+  "highlight", "ignore", "improve", "include", "increase", "involve", "learn", "load",
+  "look", "mark", "move", "need", "offer", "open", "play", "produce", "provide",
+  "read", "receive", "reduce", "remember", "require", "review", "save", "select",
+  "show", "start", "stop", "support", "talk", "test", "translate", "turn", "update",
+  "use", "walk", "want", "watch", "work",
 ] as const;
 
 const SAFE_DEGREE_BASES = [
@@ -214,30 +222,43 @@ export function resolveLookupLemma(surface: string): string {
   return candidates.find((candidate) => RANK_MAP.has(candidate)) ?? candidates[0];
 }
 
-export function resolveMasteryKey(surface: string): string {
+export type MasteryResolutionReason =
+  | "phrase"
+  | "safe-irregular"
+  | "safe-regular"
+  | "confident-regular"
+  | "unique-lemma"
+  | "surface";
+
+interface MasteryResolution {
+  key: string;
+  reason: MasteryResolutionReason;
+}
+
+function resolveMastery(surface: string): MasteryResolution {
   if (/\s/.test(surface.trim())) {
-    return normalizePhraseKey(surface);
+    return { key: normalizePhraseKey(surface), reason: "phrase" };
   }
 
   const candidates = getLemmaCandidates(surface);
   if (!candidates.length) {
-    return "";
+    return { key: "", reason: "surface" };
   }
 
   const token = candidates[0];
   const safeIrregular = SAFE_IRREGULAR_MASTERY[token];
   if (safeIrregular) {
-    return safeIrregular;
+    return { key: safeIrregular, reason: "safe-irregular" };
   }
 
   const safeRegular = SAFE_REGULAR_MASTERY.get(token);
   if (safeRegular) {
-    return safeRegular;
+    return { key: safeRegular, reason: "safe-regular" };
   }
 
   const confidentRegular = resolveConfidentRegularMastery(token, candidates);
   if (confidentRegular) {
-    return confidentRegular;
+    return { key: confidentRegular, reason: "confident-regular" };
   }
 
   // If the surface is absent from the frequency lexicon, a single lexical
@@ -245,9 +266,71 @@ export function resolveMasteryKey(surface: string): string {
   if (!RANK_MAP.has(token)) {
     const variants = rankedCandidates(candidates.slice(1));
     if (variants.length === 1) {
-      return variants[0].word;
+      return { key: variants[0].word, reason: "unique-lemma" };
     }
   }
 
-  return token;
+  return { key: token, reason: "surface" };
+}
+
+export function resolveMasteryKey(surface: string): string {
+  return resolveMastery(surface).key;
+}
+
+export type MasteryIdentityKind =
+  | "canonical"
+  | "shared-inflection"
+  | "independent-inflection"
+  | "compound";
+
+export interface MasteryIdentity {
+  masteryKey: string;
+  kind: MasteryIdentityKind;
+  reason: MasteryResolutionReason;
+  lexicalLemma?: string;
+  components?: string[];
+}
+
+export function resolveMasteryIdentity(surface: string, lexicalLemma?: string): MasteryIdentity {
+  const resolution = resolveMastery(surface);
+  const candidates = getLemmaCandidates(surface);
+  const token = candidates[0] || surface.trim().toLowerCase();
+  const normalizedLexicalLemma = lexicalLemma?.trim().toLowerCase() || undefined;
+  const components = getHyphenatedCompoundComponents(surface)
+    .map((component) => resolveLookupLemma(component) || component.toLowerCase());
+
+  if (components.length >= 2) {
+    return {
+      masteryKey: resolution.key,
+      kind: "compound",
+      reason: resolution.reason,
+      lexicalLemma: normalizedLexicalLemma,
+      components,
+    };
+  }
+
+  if (resolution.key && resolution.key !== token) {
+    return {
+      masteryKey: resolution.key,
+      kind: "shared-inflection",
+      reason: resolution.reason,
+      lexicalLemma: normalizedLexicalLemma,
+    };
+  }
+
+  if (normalizedLexicalLemma && normalizedLexicalLemma !== token) {
+    return {
+      masteryKey: resolution.key,
+      kind: "independent-inflection",
+      reason: resolution.reason,
+      lexicalLemma: normalizedLexicalLemma,
+    };
+  }
+
+  return {
+    masteryKey: resolution.key,
+    kind: "canonical",
+    reason: resolution.reason,
+    lexicalLemma: normalizedLexicalLemma,
+  };
 }
