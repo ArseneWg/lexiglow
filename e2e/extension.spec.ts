@@ -148,8 +148,8 @@ test("sentence analysis retries incomplete structure and highlights the intended
     translation: "第一次残缺译文。",
     structure: "I think",
     analysisSteps: ["切分。", "找主干。", "看修饰。", "安排译序。"],
-    highlights: [{ category: "predicate", text: "think", tokenIndex: 1 }],
-    clauseBlocks: ["main|||I think"],
+    highlights: [{ category: "predicate", tokenIndex: 1 }],
+    clauseBlocks: [{ type: "main", startToken: 0, endToken: 17 }],
   };
   const second = {
     translation: "第二次完整译文。",
@@ -161,14 +161,14 @@ test("sentence analysis retries incomplete structure and highlights the intended
       "先译主干，再补关系从句和原因从句。",
     ],
     highlights: [
-      { category: "subject", text: "I", tokenIndex: 0 },
-      { category: "predicate", text: "shows", tokenIndex: 8 },
-      { category: "relative", text: "that", tokenIndex: 5 },
-      { category: "conjunction", text: "because", tokenIndex: 13 },
+      { category: "subject", tokenIndex: 0 },
+      { category: "predicate", tokenIndex: 8 },
+      { category: "relative", tokenIndex: 5 },
+      { category: "conjunction", tokenIndex: 13 },
     ],
     clauseBlocks: [
-      "main|||I think that the model that we tested shows that careful analysis matters",
-      "subordinate|||because readers rely on structure.",
+      { type: "main", startToken: 0, endToken: 12 },
+      { type: "subordinate", startToken: 13, endToken: 17 },
     ],
   };
 

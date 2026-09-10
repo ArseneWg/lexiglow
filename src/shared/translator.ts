@@ -8,16 +8,19 @@ import {
   lookupStructuredLexicalSenses,
 } from "./lexicalSense";
 import {
-  legacyOpenAiConnectionFromSettings,
-  requestOpenAiCompatibleTask,
-  resolveOpenAiCompatibilityPreset,
-} from "./llm/openAiCompatible";
+  executeLlmTask,
+  getLlmRequestStatus,
+  getRuntimeLlmCacheSignature,
+  requiresLlmApiKey,
+  shouldFallbackToGoogleOnLlmError,
+} from "./llm/runtime";
 import {
-  LlmProviderFormatError,
-  LlmProviderRequestError,
-  type LlmTaskKind,
-  type LlmTaskReasoning,
-} from "./llm/contracts";
+  getDefaultLlmBaseUrl,
+  getDefaultLlmModel,
+  getLlmProviderDefinition,
+  resolveStoredLlmProvider,
+} from "./llm/providerRegistry";
+import { LlmProviderFormatError } from "./llm/contracts";
 import type {
   EnglishExplanationResult,
   LearnerLevelBand,
@@ -38,7 +41,7 @@ export const DEFAULT_TRANSLATOR_SETTINGS: TranslatorSettings = {
   defaultTranslationProvider: "google",
   llmProvider: "openai",
   providerBaseUrl: "https://api.openai.com/v1",
-  providerModel: "gpt-4.1-mini",
+  providerModel: "gpt-5.6-luna",
   apiKey: "",
   fallbackToGoogle: true,
   learnerLanguageCode: "zh-CN",
@@ -85,39 +88,8 @@ const LEARNER_LANGUAGE_MAP = new Map(
   LEARNER_LANGUAGE_OPTIONS.map((option) => [option.code, option]),
 );
 
-const LLM_PROVIDER_DEFAULTS = {
-  openai: {
-    baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4.1-mini",
-  },
-  gemini: {
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    model: "gemini-2.5-flash",
-  },
-  claude: {
-    baseUrl: "https://api.anthropic.com/v1",
-    model: "claude-sonnet-4-20250514",
-  },
-} as const;
 
 const WORD_TRANSLATION_REQUEST_TIMEOUT_MS = 8000;
-const SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS = 10000;
-const SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 25000;
-const LONG_SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS = 18000;
-const COMPLEX_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 45000;
-const RETRY_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS = 60000;
-
-function selectionTranslationMaxTokens(text: string): number {
-  const wordCount = text.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g)?.length ?? 0;
-  const estimatedOutput = Math.max(180, Math.ceil(text.length * 0.9), wordCount * 4 + 96);
-  return Math.min(1600, estimatedOutput);
-}
-
-function selectionTranslationTimeoutMs(text: string): number {
-  if (text.length > 500) return LONG_SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS;
-  if (text.length > 220) return 14000;
-  return SELECTION_TRANSLATION_REQUEST_TIMEOUT_MS;
-}
 const PRESERVE_PROPER_NAMES_INSTRUCTION =
   "Keep person names, usernames, brand names, and product names in their original English form instead of translating or transliterating them.";
 
@@ -126,13 +98,7 @@ function trimContext(contextText: string): string {
   return compact.length > 220 ? `${compact.slice(0, 217)}...` : compact;
 }
 
-export function getDefaultLlmBaseUrl(provider: TranslatorSettings["llmProvider"]): string {
-  return LLM_PROVIDER_DEFAULTS[provider].baseUrl;
-}
-
-export function getDefaultLlmModel(provider: TranslatorSettings["llmProvider"]): string {
-  return LLM_PROVIDER_DEFAULTS[provider].model;
-}
+export { getDefaultLlmBaseUrl, getDefaultLlmModel };
 
 function resolveLearnerLanguageOption(
   code?: string,
@@ -251,12 +217,8 @@ function buildSentenceAnalysisPrompt(settings: TranslatorSettings): string {
     "   Step 3: explain logical groups, clauses, nonfinite phrases, modifiers, and what each part modifies.",
     "   Step 4: explain the learner-language translation order first and then support the final translation.",
     "   Keep each analysis step concise and review-friendly.",
-    "4. highlights: output 3 to 8 JSON objects shaped {category,text,tokenIndex}. tokenIndex is the zero-based index from the token list supplied with the sentence and must identify the exact occurrence. Allowed categories are [subject, predicate, nonfinite, conjunction, relative, preposition]. Use subject for the head word of the main-clause subject and predicate for the main finite verb, not an arbitrary word inside the phrase.",
-    "   For conjunction, use only true connectors or subordinators such as and, but, although, because, if, while, when, since, whether. Do not use sentence adverbs or discourse markers such as presently, currently, now, overall, generally.",
-    "   For relative, use only real relative words such as which, who, whom, whose, where, when, why, or that when it truly introduces a clause.",
-    "   Never highlight possessive determiners or simple pronouns such as my, your, his, her, its, our, their, it, they, them, this, these, those.",
-    '   Never highlight plain "that" when it is only a determiner, for example in "that data".',
-    "5. clauseBlocks: output 2 to 10 strings in the format <type>|||<exact original text chunk>. Allowed types are [main, relative, subordinate, nonfinite, parallel, modifier]. The clauseBlocks must cover the whole sentence from first word to last word with no missing words and no overlap. Split long parts at commas, relative words, subordinators, coordinators, or nonfinite markers when that improves clarity, but do not isolate a bare preposition by itself.",
+    "4. highlights: output 3 to 8 objects {category,tokenIndex}. Allowed categories are [subject,predicate,nonfinite,conjunction,relative,preposition]. tokenIndex must point to the exact supplied token occurrence. Do not return the token text; LexiGlow derives it from tokenIndex. Prefer the subject head and main predicate plus genuinely useful grammar markers.",
+    "5. clauseBlocks: output 1 to 10 objects {type,startToken,endToken}. Allowed types are [main,relative,subordinate,nonfinite,parallel,modifier]. Ranges are inclusive, must be in source order, must start at token 0, must end at the final token, and must cover every supplied token exactly once with no gap or overlap. Do not copy source text; LexiGlow reconstructs exact text from the token ranges.",
     "",
     "Final rules:",
     "The four steps must serve translation, avoid empty jargon, and focus on how structure changes understanding and translation order.",
@@ -292,16 +254,6 @@ async function fetchWithTimeout(
   }
 }
 
-class LlmRequestError extends Error {
-  status?: number;
-
-  constructor(message: string, status?: number) {
-    super(message);
-    this.name = "LlmRequestError";
-    this.status = status;
-  }
-}
-
 function cleanModelOutput(text: string): string {
   return text.trim().replace(/^["'`\s]+|["'`\s]+$/g, "");
 }
@@ -310,301 +262,12 @@ function stripCodeFence(text: string): string {
   return text.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
 }
 
-function readLlmError(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const error = "error" in payload ? (payload as { error?: unknown }).error : payload;
-
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    return typeof message === "string" ? message : "";
-  }
-
-  return "";
-}
-
-function readOpenAiContent(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const choices = (payload as { choices?: Array<{ message?: { content?: unknown } }> }).choices;
-  const content = choices?.[0]?.message?.content;
-
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .map((part) => {
-      if (!part || typeof part !== "object") {
-        return "";
-      }
-
-      return typeof (part as { text?: unknown }).text === "string"
-        ? (part as { text: string }).text
-        : "";
-    })
-    .filter(Boolean)
-    .join("");
-}
-
-function readGeminiContent(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const candidates = (payload as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
-  }).candidates;
-  const parts = candidates?.[0]?.content?.parts ?? [];
-
-  return parts
-    .map((part) => (typeof part?.text === "string" ? part.text : ""))
-    .filter(Boolean)
-    .join("");
-}
-
-function readClaudeContent(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const content = (payload as {
-    content?: Array<{ type?: unknown; text?: unknown }>;
-  }).content ?? [];
-
-  return content
-    .map((block) => (
-      block?.type === "text" && typeof block?.text === "string"
-        ? block.text
-        : ""
-    ))
-    .filter(Boolean)
-    .join("");
-}
-
-function readOpenAiFinishReason(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const choices = (payload as { choices?: Array<{ finish_reason?: unknown }> }).choices;
-  return typeof choices?.[0]?.finish_reason === "string" ? choices[0].finish_reason : "";
-}
-
-function readGeminiFinishReason(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const candidates = (payload as { candidates?: Array<{ finishReason?: unknown }> }).candidates;
-  return typeof candidates?.[0]?.finishReason === "string" ? candidates[0].finishReason : "";
-}
-
-function readClaudeFinishReason(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  return typeof (payload as { stop_reason?: unknown }).stop_reason === "string"
-    ? (payload as { stop_reason: string }).stop_reason
-    : "";
-}
-
 function getLlmProviderTag(): string {
   return "llm";
 }
 
-export function getLlmCacheSignature(settings: Pick<
-  TranslatorSettings,
-  "llmProvider" | "providerBaseUrl" | "providerModel" | "learnerLanguageCode"
->): string {
-  return [
-    settings.llmProvider,
-    settings.providerBaseUrl.trim().replace(/\/+$/, ""),
-    settings.providerModel.trim(),
-    settings.learnerLanguageCode,
-  ].join("::");
-}
-
-function isMaxTokenFinishReason(finishReason: string): boolean {
-  const normalized = finishReason.trim().toLowerCase();
-  return normalized === "length" || normalized === "max_tokens" || normalized === "max tokens";
-}
-
-function resolveLlmEndpoint(settings: TranslatorSettings): string {
-  const baseUrl = settings.providerBaseUrl.replace(/\/+$/, "");
-
-  switch (settings.llmProvider) {
-    case "gemini":
-      return `${baseUrl}/models/${encodeURIComponent(settings.providerModel)}:generateContent`;
-    case "claude":
-      return `${baseUrl}/messages`;
-    case "openai":
-      return `${baseUrl}/chat/completions`;
-  }
-}
-
-async function requestLlmText({
-  settings,
-  systemPrompt,
-  userPrompt,
-  temperature,
-  maxTokens,
-  timeoutMs,
-  preferJson,
-  task,
-  reasoning,
-}: {
-  settings: TranslatorSettings;
-  systemPrompt: string;
-  userPrompt: string;
-  temperature: number;
-  maxTokens: number;
-  timeoutMs: number;
-  preferJson?: boolean;
-  task?: LlmTaskKind;
-  reasoning?: LlmTaskReasoning;
-}): Promise<{ content: string; finishReason: string; payload: unknown; response: Response }> {
-  if (settings.llmProvider === "openai") {
-    if (!preferJson || !task) {
-      throw new LlmProviderFormatError("OpenAI-compatible v2 requires an explicit structured task contract.");
-    }
-    const result = await requestOpenAiCompatibleTask({
-      connection: legacyOpenAiConnectionFromSettings(settings),
-      task,
-      systemPrompt,
-      userPrompt,
-      maxTokens,
-      timeoutMs,
-      reasoning,
-    });
-    return {
-      content: result.content,
-      finishReason: result.finishReason,
-      payload: result.payload,
-      response: result.response,
-    };
-  }
-
-  const endpoint = resolveLlmEndpoint(settings);
-
-  let init: RequestInit;
-
-  switch (settings.llmProvider) {
-    case "gemini":
-      init = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": settings.apiKey,
-        },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: systemPrompt }],
-          },
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: userPrompt }],
-            },
-          ],
-          generationConfig: {
-            temperature,
-            maxOutputTokens: maxTokens,
-            ...(preferJson ? { responseMimeType: "application/json" } : {}),
-          },
-        }),
-      };
-      break;
-    case "claude":
-      init = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": settings.apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: settings.providerModel,
-          system: systemPrompt,
-          temperature,
-          max_tokens: maxTokens,
-          messages: [
-            {
-              role: "user",
-              content: userPrompt,
-            },
-          ],
-        }),
-      };
-      break;
-  }
-
-  const response = await fetchWithTimeout(endpoint, init, timeoutMs);
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    const message = readLlmError(payload);
-    throw new LlmRequestError(message || `LLM request failed: ${response.status}`, response.status);
-  }
-
-  switch (settings.llmProvider) {
-    case "gemini":
-      return {
-        content: readGeminiContent(payload),
-        finishReason: readGeminiFinishReason(payload),
-        payload,
-        response,
-      };
-    case "claude":
-      return {
-        content: readClaudeContent(payload),
-        finishReason: readClaudeFinishReason(payload),
-        payload,
-        response,
-      };
-  }
-}
-
-function requiresLlmApiKey(settings: TranslatorSettings): boolean {
-  if (settings.llmProvider !== "openai") return true;
-  try {
-    const hostname = new URL(settings.providerBaseUrl).hostname.toLowerCase();
-    return hostname === "api.openai.com" || hostname.endsWith(".openai.com");
-  } catch {
-    return true;
-  }
-}
-
-function getLlmRequestStatus(error: unknown): number {
-  if (error instanceof LlmRequestError || error instanceof LlmProviderRequestError) {
-    return error.status ?? 0;
-  }
-  return 0;
-}
-
-function shouldFallbackToGoogle(status: number, message: string): boolean {
-  const normalized = message.toLowerCase();
-
-  return (
-    status === 401 ||
-    status === 402 ||
-    status === 429 ||
-    normalized.includes("quota") ||
-    normalized.includes("balance") ||
-    normalized.includes("credit") ||
-    normalized.includes("insufficient") ||
-    normalized.includes("rate limit") ||
-    normalized.includes("api key")
-  );
+export function getLlmCacheSignature(settings: Pick<TranslatorSettings, "llmProvider" | "providerBaseUrl" | "providerModel" | "learnerLanguageCode">): string {
+  return getRuntimeLlmCacheSignature(settings);
 }
 
 class TranslatorFallbackError extends Error {
@@ -821,7 +484,6 @@ export function parseLlmTranslationResponse(payload: string): {
   englishExplanation?: string;
   contextualPartOfSpeech?: string;
   semanticHint?: string;
-  alternativeMeanings?: Array<{ meaning: string; semanticHint?: string; partOfSpeech?: string }>;
 } {
   const content = stripCodeFence(payload);
   const jsonStart = content.indexOf("{");
@@ -835,7 +497,6 @@ export function parseLlmTranslationResponse(payload: string): {
         english?: unknown;
         pos?: unknown;
         hint?: unknown;
-        alternatives?: unknown;
       };
       const translation = cleanModelOutput(typeof parsed.word === "string" ? parsed.word : "");
       const sentenceTranslation = cleanModelOutput(
@@ -848,22 +509,6 @@ export function parseLlmTranslationResponse(payload: string): {
         typeof parsed.pos === "string" ? parsed.pos : "",
       );
       const semanticHint = cleanModelOutput(typeof parsed.hint === "string" ? parsed.hint : "");
-      const alternativeMeanings = Array.isArray(parsed.alternatives)
-        ? parsed.alternatives.flatMap((item) => {
-            if (!item || typeof item !== "object") return [];
-            const object = item as { meaning?: unknown; hint?: unknown; pos?: unknown };
-            const meaning = cleanModelOutput(typeof object.meaning === "string" ? object.meaning : "");
-            if (!meaning || meaning === translation) return [];
-            const hint = cleanModelOutput(typeof object.hint === "string" ? object.hint : "");
-            const pos = normalizeContextualPartOfSpeech(typeof object.pos === "string" ? object.pos : "");
-            return [{
-              meaning,
-              semanticHint: hint || undefined,
-              partOfSpeech: pos,
-            }];
-          }).slice(0, 3)
-        : [];
-
       if (translation) {
         return {
           translation,
@@ -871,7 +516,6 @@ export function parseLlmTranslationResponse(payload: string): {
           englishExplanation: englishExplanation || undefined,
           contextualPartOfSpeech,
           semanticHint: semanticHint || undefined,
-          alternativeMeanings: alternativeMeanings.length ? alternativeMeanings : undefined,
         };
       }
     } catch {
@@ -928,137 +572,6 @@ const ANALYSIS_PLAIN_PREPOSITIONS = new Set([
   "without", "within", "across",
 ]);
 
-const ANALYSIS_PAIR_SEPARATOR = "|||";
-
-function parseAnalysisPair(
-  value: string,
-): { left: string; right: string } | null {
-  const separatorIndex = value.indexOf(ANALYSIS_PAIR_SEPARATOR);
-
-  if (separatorIndex < 0) {
-    return null;
-  }
-
-  const left = cleanModelOutput(value.slice(0, separatorIndex));
-  const right = cleanModelOutput(value.slice(separatorIndex + ANALYSIS_PAIR_SEPARATOR.length));
-
-  if (!left || !right) {
-    return null;
-  }
-
-  return { left, right };
-}
-
-function sanitizeAnalysisHighlights(input: unknown): SentenceHighlight[] {
-  if (!Array.isArray(input)) return [];
-
-  return input.map((item) => {
-    if (typeof item === "string") {
-      const parsedPair = parseAnalysisPair(item);
-      if (!parsedPair) return null;
-      const category = parsedPair.left as SentenceHighlightCategory;
-      const text = parsedPair.right;
-      if (!HIGHLIGHT_CATEGORIES.has(category)) return null;
-      return { text, category };
-    }
-
-    if (!item || typeof item !== "object") return null;
-    const object = item as { text?: unknown; category?: unknown; tokenIndex?: unknown };
-    const text = cleanModelOutput(typeof object.text === "string" ? object.text : "");
-    const category = typeof object.category === "string"
-      ? object.category as SentenceHighlightCategory
-      : null;
-    const tokenIndex = typeof object.tokenIndex === "number" && Number.isInteger(object.tokenIndex)
-      ? object.tokenIndex
-      : undefined;
-    const normalized = text.toLowerCase();
-    if (
-      !text || !category || !HIGHLIGHT_CATEGORIES.has(category) ||
-      (category !== "preposition" && ANALYSIS_PLAIN_PREPOSITIONS.has(normalized))
-    ) return null;
-    return tokenIndex !== undefined ? { text, category, tokenIndex } : { text, category };
-  }).filter((item): item is SentenceHighlight => Boolean(item));
-}
-
-const CLAUSE_BLOCK_TYPES = new Set<SentenceClauseBlockType>([
-  "main",
-  "relative",
-  "subordinate",
-  "nonfinite",
-  "parallel",
-  "modifier",
-]);
-
-function sanitizeClauseBlocks(input: unknown): SentenceClauseBlock[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-
-  const blocks = input
-    .map((item) => {
-      if (typeof item === "string") {
-        const parsedPair = parseAnalysisPair(item);
-
-        if (!parsedPair) {
-          return null;
-        }
-
-        const type = parsedPair.left as SentenceClauseBlockType;
-        const text = parsedPair.right;
-
-        if (!text || !CLAUSE_BLOCK_TYPES.has(type)) {
-          return null;
-        }
-
-        return {
-          text,
-          type,
-          label: undefined,
-        };
-      }
-
-      if (!item || typeof item !== "object") {
-        return null;
-      }
-
-      const type = cleanModelOutput(
-        typeof (item as { type?: unknown }).type === "string" ? (item as { type: string }).type : "",
-      );
-      const text = cleanModelOutput(
-        typeof (item as { text?: unknown }).text === "string" ? (item as { text: string }).text : "",
-      );
-      const label = cleanModelOutput(
-        typeof (item as { label?: unknown }).label === "string"
-          ? (item as { label: string }).label
-          : "",
-      );
-
-      if (!text || !type || !CLAUSE_BLOCK_TYPES.has(type as SentenceClauseBlockType)) {
-        return null;
-      }
-
-      return {
-        text,
-        type: type as SentenceClauseBlockType,
-        label: label || undefined,
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => Boolean(item));
-
-  return blocks.map((block) => (block.label ? block : { text: block.text, type: block.type }));
-}
-
-function extractJsonObjectText(content: string): string {
-  const stripped = stripCodeFence(content);
-  const jsonStart = stripped.indexOf("{");
-  const jsonEnd = stripped.lastIndexOf("}");
-
-  if (jsonStart < 0 || jsonEnd <= jsonStart) {
-    throw new SentenceAnalysisFormatError("Sentence analysis response was not valid JSON.");
-  }
-
-  return stripped.slice(jsonStart, jsonEnd + 1);
-}
 
 export class SentenceAnalysisFormatError extends Error {
   constructor(message: string) {
@@ -1087,136 +600,14 @@ function logSentenceAnalysisDebug(event: string, detail: Record<string, unknown>
   console.warn("[LexiGlow][sentence-analysis]", event, detail);
 }
 
-function repairLooseJson(jsonText: string): string {
-  const withoutTrailingCommas = jsonText.replace(/,\s*([}\]])/g, "$1");
-  let output = "";
-  let inString = false;
-  let escaping = false;
-  let lastSignificantChar = "";
-
-  const canEndJsonValue = (char: string) =>
-    char === '"' || char === "}" || char === "]" || /[0-9A-Za-z]/.test(char);
-  const canStartJsonValue = (char: string) =>
-    char === '"' || char === "{" || char === "[" || char === "-" || /[0-9tfn]/i.test(char);
-
-  for (let index = 0; index < withoutTrailingCommas.length; index += 1) {
-    const char = withoutTrailingCommas[index];
-
-    if (inString) {
-      output += char;
-
-      if (escaping) {
-        escaping = false;
-      } else if (char === "\\") {
-        escaping = true;
-      } else if (char === '"') {
-        inString = false;
-        lastSignificantChar = '"';
-      }
-
-      continue;
-    }
-
-    if (char === '"') {
-      if (
-        lastSignificantChar &&
-        canEndJsonValue(lastSignificantChar) &&
-        canStartJsonValue(char) &&
-        !["{", "[", ":", ","].includes(lastSignificantChar)
-      ) {
-        output += ",";
-      }
-
-      output += char;
-      inString = true;
-      continue;
-    }
-
-    if (/\s/.test(char)) {
-      output += char;
-      continue;
-    }
-
-    if (
-      lastSignificantChar &&
-      canEndJsonValue(lastSignificantChar) &&
-      canStartJsonValue(char) &&
-      !["{", "[", ":", ","].includes(lastSignificantChar)
-    ) {
-      output += ",";
-    }
-
-    output += char;
-    lastSignificantChar = char;
-  }
-
-  return output;
-}
-
-function parseJsonObjectWithRepair<T>(payload: string): T {
-  const rawJson = extractJsonObjectText(payload);
-
-  try {
-    return JSON.parse(rawJson) as T;
-  } catch (error) {
-    try {
-      return JSON.parse(repairLooseJson(rawJson)) as T;
-    } catch {
-      throw new SentenceAnalysisFormatError(
-        error instanceof Error ? error.message : "Sentence analysis response was not valid JSON.",
-      );
-    }
-  }
-}
-
-export function parseSentenceAnalysisResponse(payload: string): Omit<
-  SentenceAnalysisResult,
-  "provider" | "cached"
-> {
-  const parsed = parseJsonObjectWithRepair<{
-    translation?: unknown;
-    structure?: unknown;
-    analysisSteps?: unknown;
-    cutSummary?: unknown;
-    backboneSummary?: unknown;
-    branchSummary?: unknown;
-    translationSummary?: unknown;
-    highlights?: unknown;
-    clauseBlocks?: unknown;
-  }>(payload);
-
-  const translation = cleanModelOutput(
-    typeof parsed.translation === "string" ? parsed.translation : "",
-  );
-  const structure = cleanModelOutput(typeof parsed.structure === "string" ? parsed.structure : "");
-  const analysisStepsFromArray = Array.isArray(parsed.analysisSteps)
-    ? parsed.analysisSteps
-        .map((step) => cleanModelOutput(typeof step === "string" ? step : ""))
-        .filter(Boolean)
-    : [];
-  const analysisStepsFromFields = [
-    cleanModelOutput(typeof parsed.cutSummary === "string" ? parsed.cutSummary : ""),
-    cleanModelOutput(typeof parsed.backboneSummary === "string" ? parsed.backboneSummary : ""),
-    cleanModelOutput(typeof parsed.branchSummary === "string" ? parsed.branchSummary : ""),
-    cleanModelOutput(typeof parsed.translationSummary === "string" ? parsed.translationSummary : ""),
-  ].filter(Boolean);
-  const analysisSteps =
-    analysisStepsFromArray.length >= 4 ? analysisStepsFromArray : analysisStepsFromFields;
-  const highlights = sanitizeAnalysisHighlights(parsed.highlights);
-  const clauseBlocks = sanitizeClauseBlocks(parsed.clauseBlocks);
-
-  if (!translation || !structure || !analysisSteps.length) {
-    throw new SentenceAnalysisFormatError("Sentence analysis response was incomplete.");
-  }
-
-  return {
-    translation,
-    structure,
-    analysisSteps,
-    highlights,
-    clauseBlocks,
-  };
-}
+const CLAUSE_BLOCK_TYPES = new Set<SentenceClauseBlockType>([
+  "main",
+  "relative",
+  "subordinate",
+  "nonfinite",
+  "parallel",
+  "modifier",
+]);
 
 interface AnalysisToken { index: number; text: string; start: number; end: number }
 
@@ -1233,99 +624,133 @@ function tokenizeSentenceForAnalysis(sentence: string): AnalysisToken[] {
   return tokens;
 }
 
-function attachHighlightOffsets(
-  result: Omit<SentenceAnalysisResult, "provider" | "cached">,
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseSentenceHighlightRanges(
+  value: unknown,
+  tokens: AnalysisToken[],
+): SentenceHighlight[] {
+  if (!Array.isArray(value)) throw new SentenceAnalysisFormatError("highlights must be an array.");
+  return value.map((item, index) => {
+    if (!isRecord(item) || !HIGHLIGHT_CATEGORIES.has(item.category as SentenceHighlightCategory)) {
+      throw new SentenceAnalysisFormatError(`highlight ${index + 1} has an invalid category.`);
+    }
+    if (!Number.isInteger(item.tokenIndex)) {
+      throw new SentenceAnalysisFormatError(`highlight ${index + 1} is missing a valid tokenIndex.`);
+    }
+    const token = tokens[item.tokenIndex as number];
+    if (!token) throw new SentenceAnalysisFormatError(`highlight ${index + 1} points outside the source tokens.`);
+    const category = item.category as SentenceHighlightCategory;
+    if (category === "preposition" && !ANALYSIS_PLAIN_PREPOSITIONS.has(token.text.toLowerCase())) {
+      throw new SentenceAnalysisFormatError(`highlight ${index + 1} marks a non-preposition as a preposition.`);
+    }
+    return { category, text: token.text, tokenIndex: token.index, start: token.start, end: token.end };
+  });
+}
+
+function parseSentenceClauseRanges(
+  value: unknown,
+  tokens: AnalysisToken[],
+  sentence: string,
+): SentenceClauseBlock[] {
+  if (!Array.isArray(value) || !value.length) {
+    throw new SentenceAnalysisFormatError("clauseBlocks must contain token ranges.");
+  }
+  if (!tokens.length) throw new SentenceAnalysisFormatError("The source sentence has no analyzable tokens.");
+
+  const ranges = value.map((item, index) => {
+    if (!isRecord(item) || !CLAUSE_BLOCK_TYPES.has(item.type as SentenceClauseBlockType)) {
+      throw new SentenceAnalysisFormatError(`clause block ${index + 1} has an invalid type.`);
+    }
+    const startToken = item.startToken;
+    const endToken = item.endToken;
+    if (!Number.isInteger(startToken) || !Number.isInteger(endToken)) {
+      throw new SentenceAnalysisFormatError(`clause block ${index + 1} must use integer token ranges.`);
+    }
+    const start = startToken as number;
+    const end = endToken as number;
+    if (start < 0 || end < start || end >= tokens.length) {
+      throw new SentenceAnalysisFormatError(`clause block ${index + 1} points outside the source tokens.`);
+    }
+    return { type: item.type as SentenceClauseBlockType, startToken: start, endToken: end };
+  });
+
+  if (ranges[0]?.startToken !== 0) {
+    throw new SentenceAnalysisFormatError("clauseBlocks must start at token 0.");
+  }
+  for (let index = 1; index < ranges.length; index += 1) {
+    if (ranges[index].startToken !== ranges[index - 1].endToken + 1) {
+      throw new SentenceAnalysisFormatError(
+        `clauseBlocks have a gap or overlap between tokens ${ranges[index - 1].endToken} and ${ranges[index].startToken}.`,
+      );
+    }
+  }
+  if (ranges.at(-1)?.endToken !== tokens.length - 1) {
+    throw new SentenceAnalysisFormatError(`clauseBlocks must end at token ${tokens.length - 1}.`);
+  }
+
+  return ranges.map((range, index) => {
+    const startChar = index === 0 ? 0 : tokens[range.startToken].start;
+    const nextRange = ranges[index + 1];
+    const endChar = nextRange ? tokens[nextRange.startToken].start : sentence.length;
+    return {
+      type: range.type,
+      startToken: range.startToken,
+      endToken: range.endToken,
+      text: sentence.slice(startChar, endChar).trim(),
+    };
+  });
+}
+
+export function parseSentenceAnalysisResponse(
+  payload: string,
   sentence: string,
 ): Omit<SentenceAnalysisResult, "provider" | "cached"> {
-  const tokens = tokenizeSentenceForAnalysis(sentence);
-  const used = new Set<number>();
-  const highlights = result.highlights.flatMap((item) => {
-    let token = Number.isInteger(item.tokenIndex) ? tokens[item.tokenIndex as number] : undefined;
-    if (!token || token.text.toLowerCase() !== item.text.toLowerCase()) {
-      token = tokens.find((candidate) =>
-        !used.has(candidate.index) && candidate.text.toLowerCase() === item.text.toLowerCase());
-    }
-    if (!token) return [];
-    used.add(token.index);
-    return [{ ...item, tokenIndex: token.index, start: token.start, end: token.end }];
-  });
-  return { ...result, highlights };
-}
-
-function clauseCoverageRatio(sentence: string, blocks: SentenceClauseBlock[]): number {
-  let cursor = 0;
-  let covered = 0;
-  for (const block of blocks) {
-    const value = block.text.trim();
-    if (!value) continue;
-    const start = sentence.indexOf(value, cursor);
-    if (start < 0) continue;
-    covered += value.length;
-    cursor = start + value.length;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(stripCodeFence(payload)) as Record<string, unknown>;
+  } catch {
+    throw new SentenceAnalysisFormatError("Sentence analysis response was not valid JSON.");
   }
-  return covered / Math.max(sentence.trim().length, 1);
+  const translation = cleanModelOutput(typeof parsed.translation === "string" ? parsed.translation : "");
+  const structure = cleanModelOutput(typeof parsed.structure === "string" ? parsed.structure : "");
+  const analysisSteps = Array.isArray(parsed.analysisSteps)
+    ? parsed.analysisSteps.map((item) => cleanModelOutput(String(item))).filter(Boolean)
+    : [];
+  if (!translation || !structure || analysisSteps.length !== 4) {
+    throw new SentenceAnalysisFormatError("Sentence analysis response was incomplete.");
+  }
+  const tokens = tokenizeSentenceForAnalysis(sentence);
+  return {
+    translation,
+    structure,
+    analysisSteps,
+    highlights: parseSentenceHighlightRanges(parsed.highlights, tokens),
+    clauseBlocks: parseSentenceClauseRanges(parsed.clauseBlocks, tokens, sentence),
+  };
 }
 
-function sentenceAnalysisNeedsRetry(
+function sentenceAnalysisValidationErrors(
   result: Omit<SentenceAnalysisResult, "provider" | "cached">,
   sentence: string,
-): boolean {
+): string[] {
   const wordCount = tokenizeSentenceForAnalysis(sentence).length;
   const minHighlights = wordCount <= 8 ? 1 : wordCount <= 16 ? 2 : 3;
   const minBlocks = wordCount <= 8 ? 1 : 2;
-  if (result.highlights.length < minHighlights || result.clauseBlocks.length < minBlocks) return true;
-  if (result.highlights.some((item) => item.tokenIndex === undefined)) return true;
-  if (clauseCoverageRatio(sentence, result.clauseBlocks) < 0.9) return true;
-  const categories = new Set(result.highlights.map((item) => item.category));
-  return wordCount > 12 && categories.size < 2;
-}
-
-interface SentenceAnalysisExecutionPolicy {
-  reasoning?: LlmTaskReasoning;
-  maxTokens: number;
-  timeoutMs: number;
-}
-
-function sentenceAnalysisExecutionPolicy(
-  settings: TranslatorSettings,
-  sentence: string,
-  qualityRetry: boolean,
-): SentenceAnalysisExecutionPolicy {
-  const wordCount = tokenizeSentenceForAnalysis(sentence).length;
-  const clauseMarkers = sentence.match(/\b(?:although|though|whereas|while|because|since|if|unless|when|whenever|which|who|whom|whose|where|whether|and|but|yet)\b/gi)?.length ?? 0;
-  const punctuation = sentence.match(/[,;:—()]/g)?.length ?? 0;
-  const complex = wordCount >= 24
-    || sentence.length >= 180
-    || clauseMarkers >= 3
-    || (wordCount >= 16 && punctuation >= 2);
-  const isDeepSeek = settings.llmProvider === "openai"
-    && resolveOpenAiCompatibilityPreset(settings.providerBaseUrl) === "deepseek";
-
-  if (isDeepSeek) {
-    if (qualityRetry) {
-      return {
-        reasoning: "high",
-        maxTokens: complex ? 8000 : 6000,
-        timeoutMs: RETRY_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS,
-      };
-    }
-    return {
-      reasoning: complex ? "high" : "low",
-      maxTokens: complex ? 6000 : 3200,
-      timeoutMs: complex
-        ? COMPLEX_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS
-        : 30000,
-    };
+  const errors: string[] = [];
+  if (result.highlights.length < minHighlights) {
+    errors.push(`expected at least ${minHighlights} useful grammar highlights; got ${result.highlights.length}`);
   }
-
-  return {
-    maxTokens: qualityRetry ? 4800 : complex ? 3600 : 2400,
-    timeoutMs: qualityRetry
-      ? RETRY_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS
-      : complex
-        ? COMPLEX_SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS
-        : SENTENCE_ANALYSIS_REQUEST_TIMEOUT_MS,
-  };
+  if (result.clauseBlocks.length < minBlocks) {
+    errors.push(`expected at least ${minBlocks} clause blocks; got ${result.clauseBlocks.length}`);
+  }
+  const categories = new Set(result.highlights.map((item) => item.category));
+  if (wordCount > 12 && categories.size < 2) {
+    errors.push("long sentences must identify at least two grammar highlight categories");
+  }
+  return errors;
 }
 
 function shouldRetrySentenceAnalysisError(error: unknown): boolean {
@@ -1337,52 +762,56 @@ async function requestSentenceAnalysis({
   sentence,
   systemPrompt,
   qualityRetry = false,
+  retryFeedback = [],
 }: {
   settings: TranslatorSettings;
   sentence: string;
   systemPrompt: string;
   qualityRetry?: boolean;
+  retryFeedback?: string[];
 }): Promise<Omit<SentenceAnalysisResult, "provider" | "cached">> {
   const tokens = tokenizeSentenceForAnalysis(sentence);
   const tokenList = tokens.map((token) => `${token.index}:${token.text}`).join(" ");
   const retryInstruction = qualityRetry
-    ? "\nquality_retry: The previous attempt was incomplete, truncated, empty, or failed structural validation. Return one complete JSON object. Cover the entire source with exact clauseBlocks and use exact tokenIndex values for every highlight. Do not omit required fields."
+    ? `
+quality_retry: The previous attempt failed validation. Fix every issue below and return one complete JSON object.
+${retryFeedback.map((item) => `- ${item}`).join("\n")}
+Use only tokenIndex/startToken/endToken values from the supplied token list. Do not copy source text into highlights or clauseBlocks.`
     : "";
-  const policy = sentenceAnalysisExecutionPolicy(settings, sentence, qualityRetry);
-  let llmResult: { content: string; finishReason: string; payload: unknown; response: Response };
-
+  let llmResult: Awaited<ReturnType<typeof executeLlmTask>>;
   try {
-    llmResult = await requestLlmText({
+    llmResult = await executeLlmTask({
       settings,
-      systemPrompt,
-      userPrompt: `sentence: ${sentence}\ntokens: ${tokenList}${retryInstruction}`,
-      temperature: qualityRetry ? 0 : 0.1,
-      maxTokens: policy.maxTokens,
-      timeoutMs: policy.timeoutMs,
-      preferJson: true,
       task: "sentence-analysis",
-      reasoning: policy.reasoning,
+      systemPrompt,
+      userPrompt: `sentence: ${sentence}
+tokens: ${tokenList}${retryInstruction}`,
+      sourceText: sentence,
+      qualityRetry,
     });
   } catch (error) {
     throw new SentenceAnalysisRequestError(
       error instanceof Error ? error.message : "LLM analysis request failed.",
-      { status: getLlmRequestStatus(error) || undefined, responseText: "", stage: qualityRetry ? "quality-retry" : "single-shot", retryable: error instanceof LlmProviderFormatError },
+      {
+        status: getLlmRequestStatus(error) || undefined,
+        responseText: "",
+        stage: qualityRetry ? "quality-retry" : "single-shot",
+        retryable: error instanceof LlmProviderFormatError,
+      },
     );
   }
 
-  const { content, finishReason, response } = llmResult;
-  if (isMaxTokenFinishReason(finishReason)) {
-    throw new SentenceAnalysisRequestError("Sentence analysis response was truncated by max tokens.", {
-      status: response.status, responseText: content.slice(0, 1600), stage: qualityRetry ? "quality-retry" : "single-shot", retryable: true,
-    });
-  }
-
   try {
-    return attachHighlightOffsets(parseSentenceAnalysisResponse(content), sentence);
+    return parseSentenceAnalysisResponse(llmResult.content, sentence);
   } catch (error) {
     throw new SentenceAnalysisRequestError(
       error instanceof Error ? error.message : "Sentence analysis parsing failed.",
-      { status: response.status, responseText: content.slice(0, 1600), stage: qualityRetry ? "quality-retry" : "single-shot", retryable: true },
+      {
+        status: llmResult.response.status,
+        responseText: llmResult.content.slice(0, 1600),
+        stage: qualityRetry ? "quality-retry" : "single-shot",
+        retryable: true,
+      },
     );
   }
 }
@@ -1476,17 +905,14 @@ async function requestEnglishExplanation({
 }): Promise<{ meaning: string; explanation: string }> {
   const knownCount = countTotalKnown(userSettings);
   const learnerLevel = estimateLearnerLevel(userSettings);
-  const { content } = await requestLlmText({
+  const { content } = await executeLlmTask({
     settings,
     systemPrompt: buildEnglishExplanationSystemPrompt(settings, learnerLevel, knownCount),
     userPrompt: stricterPrompt
       ? `word: ${surface}\nsentence: ${sentence}\nextra rule: ${stricterPrompt}`
       : `word: ${surface}\nsentence: ${sentence}`,
-    temperature: 0.2,
-    maxTokens: 140,
-    timeoutMs: WORD_TRANSLATION_REQUEST_TIMEOUT_MS,
-    preferJson: true,
     task: "english-explanation",
+    sourceText: sentence,
   });
 
   return parseEnglishExplanationResponse(content);
@@ -1572,26 +998,23 @@ export async function translateWithLlm({
   let content = "";
 
   try {
-    ({ content } = await requestLlmText({
+    ({ content } = await executeLlmTask({
       settings,
       systemPrompt: buildWordTranslationSystemPrompt(settings, learnerLevel, knownCount, mode),
       userPrompt: `word: ${surface}\nlemma: ${structuredLexicon.lemma || resolveLookupLemma(surface)}\nword_form: ${structuredLexicon.wordFormLabel || "canonical"}\nsentence: ${sentence}\ndictionary_senses:\n${dictionarySenses}`,
-      temperature: 0,
-      maxTokens: needsEnglishExplanation ? 240 : needsSentence ? 220 : 180,
-      timeoutMs: WORD_TRANSLATION_REQUEST_TIMEOUT_MS,
-      preferJson: true,
       task: mode === "sentence"
         ? "contextual-word-sentence"
         : mode === "english"
           ? "contextual-word-english"
           : "contextual-word",
+      sourceText: sentence,
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "LLM request failed.";
 
     if (
       error instanceof LlmProviderFormatError
-      || shouldFallbackToGoogle(getLlmRequestStatus(error), message)
+      || shouldFallbackToGoogleOnLlmError(error)
     ) {
       throw new TranslatorFallbackError(message);
     }
@@ -1670,22 +1093,20 @@ export async function translateSelectionWithLlm({
   let content = "";
 
   try {
-    ({ content } = await requestLlmText({
+    ({ content } = await executeLlmTask({
       settings,
       systemPrompt: buildSelectionTranslationSystemPrompt(settings),
-      userPrompt: `selected_text: ${selection}\ncontext: ${context}`,
-      temperature: 0,
-      maxTokens: selectionTranslationMaxTokens(selection),
-      timeoutMs: selectionTranslationTimeoutMs(selection),
-      preferJson: true,
+      userPrompt: `selected_text: ${selection}
+context: ${context}`,
       task: "selection-translation",
+      sourceText: selection,
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "LLM selection request failed.";
 
     if (
       error instanceof LlmProviderFormatError
-      || shouldFallbackToGoogle(getLlmRequestStatus(error), message)
+      || shouldFallbackToGoogleOnLlmError(error)
     ) {
       throw new TranslatorFallbackError(message);
     }
@@ -1730,22 +1151,30 @@ export async function analyzeSentenceWithLlm({
       if (!shouldRetrySentenceAnalysisError(error)) throw error;
       usedQualityRetry = true;
       result = await requestSentenceAnalysis({
-        settings, sentence, systemPrompt: analysisPrompt, qualityRetry: true,
+        settings,
+        sentence,
+        systemPrompt: analysisPrompt,
+        qualityRetry: true,
+        retryFeedback: [error instanceof Error ? error.message : "previous response was invalid"],
       });
     }
 
-    if (sentenceAnalysisNeedsRetry(result, sentence)) {
-      if (usedQualityRetry) {
-        throw new SentenceAnalysisFormatError("Sentence analysis failed structural quality validation after retry.");
-      }
+    let validationErrors = sentenceAnalysisValidationErrors(result, sentence);
+    if (validationErrors.length && !usedQualityRetry) {
       usedQualityRetry = true;
       result = await requestSentenceAnalysis({
-        settings, sentence, systemPrompt: analysisPrompt, qualityRetry: true,
+        settings,
+        sentence,
+        systemPrompt: analysisPrompt,
+        qualityRetry: true,
+        retryFeedback: validationErrors,
       });
+      validationErrors = sentenceAnalysisValidationErrors(result, sentence);
     }
-
-    if (sentenceAnalysisNeedsRetry(result, sentence)) {
-      throw new SentenceAnalysisFormatError("Sentence analysis failed structural quality validation after retry.");
+    if (validationErrors.length) {
+      throw new SentenceAnalysisFormatError(
+        `Sentence analysis failed semantic validation: ${validationErrors.join("; ")}`,
+      );
     }
 
     return { ...result, provider: getLlmProviderTag(), cached: false };
@@ -1797,24 +1226,31 @@ export async function translateWithGoogle({
   };
 }
 
+export type TranslatorSettingsInput = Partial<Omit<TranslatorSettings, "llmProvider">> & {
+  llmProvider?: string;
+};
+
 export function sanitizeTranslatorSettings(
-  input?: Partial<TranslatorSettings> | null,
+  input?: TranslatorSettingsInput | null,
 ): TranslatorSettings {
   const rawCacheDurationValue = Number(input?.cacheDurationValue);
   const cacheDurationValue = Number.isFinite(rawCacheDurationValue)
     ? Math.min(10080, Math.max(1, Math.round(rawCacheDurationValue)))
     : DEFAULT_TRANSLATOR_SETTINGS.cacheDurationValue;
-  const llmProvider = input?.llmProvider === "gemini"
-    ? "gemini"
-    : input?.llmProvider === "claude"
-      ? "claude"
-      : "openai";
+  const llmProvider = resolveStoredLlmProvider(input?.llmProvider, input?.providerBaseUrl);
+  const provider = getLlmProviderDefinition(llmProvider);
+  let providerModel = input?.providerModel?.trim() || provider.defaultModel;
+  if (llmProvider === "anthropic" && providerModel === "claude-sonnet-4-20250514") {
+    providerModel = provider.defaultModel;
+  }
 
   return {
     defaultTranslationProvider: input?.defaultTranslationProvider === "llm" ? "llm" : "google",
     llmProvider,
-    providerBaseUrl: input?.providerBaseUrl?.trim() || getDefaultLlmBaseUrl(llmProvider),
-    providerModel: input?.providerModel?.trim() || getDefaultLlmModel(llmProvider),
+    providerBaseUrl: provider.customBaseUrl
+      ? input?.providerBaseUrl?.trim() || provider.defaultBaseUrl
+      : provider.defaultBaseUrl,
+    providerModel,
     apiKey: input?.apiKey?.trim() ?? "",
     fallbackToGoogle: input?.fallbackToGoogle ?? true,
     learnerLanguageCode: resolveLearnerLanguageOption(input?.learnerLanguageCode).code,
@@ -1830,7 +1266,7 @@ export function sanitizeTranslatorSettings(
 }
 
 export function sanitizeTranslatorProfile(
-  input?: Partial<TranslatorProfile> | null,
+  input?: (Partial<Omit<TranslatorProfile, "llmProvider">> & { llmProvider?: string }) | null,
   fallbackId = DEFAULT_TRANSLATOR_PROFILE.id,
   fallbackName = DEFAULT_TRANSLATOR_PROFILE.name,
 ): TranslatorProfile {

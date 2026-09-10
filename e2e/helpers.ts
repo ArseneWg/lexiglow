@@ -18,7 +18,7 @@ export interface SeedUserSettings {
 
 export interface SeedTranslatorSettings {
   defaultTranslationProvider?: "google" | "llm";
-  llmProvider?: "openai" | "gemini" | "claude";
+  llmProvider?: "openai" | "deepseek" | "gemini" | "anthropic" | "openai-compatible";
   providerBaseUrl?: string;
   providerModel?: string;
   apiKey?: string;
@@ -59,7 +59,7 @@ export async function seedTranslatorSettings(
     id: "e2e-profile",
     name: "E2E",
     defaultTranslationProvider: "google" as const,
-    llmProvider: "openai" as const,
+    llmProvider: "openai-compatible" as const,
     providerBaseUrl: "http://llm.test/v1",
     providerModel: "e2e-model",
     apiKey: "",
