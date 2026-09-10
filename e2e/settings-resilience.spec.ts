@@ -216,7 +216,7 @@ test("context extraction reconstructs a sentence split across inline DOM nodes",
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: openAiResponse({ word: "继续", pos: "verb" }),
+      body: openAiResponse({ word: "继续", pos: "verb", hint: "在此处表示持续执行" }),
     });
   });
 

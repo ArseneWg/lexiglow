@@ -97,8 +97,14 @@ for (const site of sites) {
           word,
           pos: "noun",
           senses: [
-            { glosses: ["a part or element used within a larger system"] },
-            { glosses: ["a constituent part of a whole"] },
+            {
+              glosses: ["a part or element used within a larger system"],
+              translations: [{ lang_code: "zh", word: "语境义" }],
+            },
+            {
+              glosses: ["a constituent part of a whole"],
+              translations: [{ lang_code: "zh", word: "其他常见义" }],
+            },
           ],
           sounds: [
             { tags: ["UK"], ipa: "/tɛst/" },
@@ -110,6 +116,7 @@ for (const site of sites) {
     await context.route("http://llm.test/v1/chat/completions", async (route) => {
       const payload = route.request().postDataJSON() as unknown;
       expect(JSON.stringify(payload)).toContain("dictionary_senses");
+      expect(JSON.stringify(payload)).not.toContain('"alternatives"');
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -117,9 +124,6 @@ for (const site of sites) {
           word: "语境义",
           pos: "noun",
           hint: "当前网页语境中的具体含义",
-          alternatives: [
-            { meaning: "其他常见义", hint: "另一种常见使用场景", pos: "noun" },
-          ],
         })),
       });
     });
@@ -129,6 +133,7 @@ for (const site of sites) {
     await expect(page.locator(".wordwise-primary-translation")).toContainText("语境义", { timeout: 12_000 });
     await expect(page.locator(".wordwise-semantic-hint")).toContainText("当前网页语境中的具体含义");
     await expect(page.locator(".wordwise-other-meanings")).toBeVisible();
+    await expect(page.locator(".wordwise-other-meanings summary")).toContainText("其他常见义");
   });
 }
 
@@ -145,7 +150,6 @@ test("React real page sends live Kaikki senses into contextual meaning resolutio
         word: "组件",
         pos: "noun",
         hint: "构成更大系统的一个部分",
-        alternatives: [],
       })),
     });
   });
