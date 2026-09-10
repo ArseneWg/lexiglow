@@ -6,6 +6,7 @@ export interface WordAtOffset {
 
 const ENGLISH_ATOM_SOURCE = "[A-Za-z]+(?:['’][A-Za-z]+)?";
 const ENGLISH_TOKEN_SOURCE = `${ENGLISH_ATOM_SOURCE}(?:-${ENGLISH_ATOM_SOURCE})*`;
+const ENGLISH_ATOM_RE = new RegExp(`^${ENGLISH_ATOM_SOURCE}$`);
 const ENGLISH_WORD_RE = new RegExp(`^${ENGLISH_TOKEN_SOURCE}$`);
 export const MAX_SELECTION_TEXT_LENGTH = 1200;
 
@@ -27,6 +28,23 @@ export function normalizeSingleEnglishWord(surface: string): string {
     .replace(/^[^A-Za-z'’-]+|[^A-Za-z'’-]+$/g, "")
     .replace(/’/g, "'");
   return ENGLISH_WORD_RE.test(compact) ? compact : "";
+}
+
+export function getHyphenatedCompoundComponents(surface: string): string[] {
+  const normalized = normalizeSingleEnglishWord(surface);
+  if (!normalized || !normalized.includes("-")) {
+    return [];
+  }
+
+  const components = normalized.split("-");
+  if (components.length < 2 || components.some((component) => !ENGLISH_ATOM_RE.test(component))) {
+    return [];
+  }
+  return components;
+}
+
+export function isHyphenatedEnglishCompound(surface: string): boolean {
+  return getHyphenatedCompoundComponents(surface).length >= 2;
 }
 
 function isAlphaNumeric(char: string | undefined): boolean {
