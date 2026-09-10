@@ -47,6 +47,7 @@ export interface StructuredLexicalLookup {
   surface: string;
   lemma: string;
   wordFormLabel?: string;
+  learnerLanguageCode?: SupportedLearnerLanguageCode;
   senses: StructuredLexicalSense[];
 }
 
@@ -161,29 +162,93 @@ export function describeEnglishWordForm(surface: string, lemma: string, partOfSp
   return "inflected form";
 }
 
+function masteryIdentityNote(
+  surface: string,
+  lemma: string,
+  learnerLanguageCode?: SupportedLearnerLanguageCode,
+): string | undefined {
+  const identity = resolveMasteryIdentity(surface, lemma);
+  const code = learnerLanguageCode || "en";
+  const components = identity.components?.join(" + ") || "";
+
+  const messages = {
+    shared: {
+      "zh-CN": `学习状态与 ${identity.masteryKey} 共享`,
+      "zh-TW": `學習狀態與 ${identity.masteryKey} 共用`,
+      ja: `${identity.masteryKey} と学習状態を共有`,
+      ko: `${identity.masteryKey}와 학습 상태 공유`,
+      fr: `statut d’apprentissage partagé avec ${identity.masteryKey}`,
+      de: `Lernstatus mit ${identity.masteryKey} geteilt`,
+      es: `estado de aprendizaje compartido con ${identity.masteryKey}`,
+      "pt-BR": `status de aprendizagem compartilhado com ${identity.masteryKey}`,
+      ru: `статус изучения общий с ${identity.masteryKey}`,
+      it: `stato di apprendimento condiviso con ${identity.masteryKey}`,
+      tr: `öğrenme durumu ${identity.masteryKey} ile ortak`,
+      vi: `trạng thái học dùng chung với ${identity.masteryKey}`,
+      id: `status belajar dibagikan dengan ${identity.masteryKey}`,
+      th: `ใช้สถานะการเรียนรู้ร่วมกับ ${identity.masteryKey}`,
+      ar: `حالة التعلّم مشتركة مع ${identity.masteryKey}`,
+      en: `mastery shared with ${identity.masteryKey}`,
+    },
+    independent: {
+      "zh-CN": `学习状态与 ${identity.lexicalLemma || lemma} 分开记录`,
+      "zh-TW": `學習狀態與 ${identity.lexicalLemma || lemma} 分開記錄`,
+      ja: `${identity.lexicalLemma || lemma} とは別に学習状態を記録`,
+      ko: `${identity.lexicalLemma || lemma}와 학습 상태를 별도로 기록`,
+      fr: `statut d’apprentissage séparé de ${identity.lexicalLemma || lemma}`,
+      de: `Lernstatus getrennt von ${identity.lexicalLemma || lemma}`,
+      es: `estado de aprendizaje separado de ${identity.lexicalLemma || lemma}`,
+      "pt-BR": `status de aprendizagem separado de ${identity.lexicalLemma || lemma}`,
+      ru: `статус изучения хранится отдельно от ${identity.lexicalLemma || lemma}`,
+      it: `stato di apprendimento separato da ${identity.lexicalLemma || lemma}`,
+      tr: `öğrenme durumu ${identity.lexicalLemma || lemma} öğesinden ayrı`,
+      vi: `trạng thái học được lưu riêng với ${identity.lexicalLemma || lemma}`,
+      id: `status belajar dicatat terpisah dari ${identity.lexicalLemma || lemma}`,
+      th: `บันทึกสถานะการเรียนรู้แยกจาก ${identity.lexicalLemma || lemma}`,
+      ar: `حالة التعلّم منفصلة عن ${identity.lexicalLemma || lemma}`,
+      en: `mastery kept separate from ${identity.lexicalLemma || lemma}`,
+    },
+    compound: {
+      "zh-CN": `组成部分：${components} · 学习状态单独记录为 ${identity.masteryKey}`,
+      "zh-TW": `組成部分：${components} · 學習狀態單獨記錄為 ${identity.masteryKey}`,
+      ja: `構成語: ${components} · 学習状態は ${identity.masteryKey} として個別管理`,
+      ko: `구성 요소: ${components} · 학습 상태는 ${identity.masteryKey}로 별도 관리`,
+      fr: `composants : ${components} · apprentissage suivi comme ${identity.masteryKey}`,
+      de: `Bestandteile: ${components} · Lernstatus separat als ${identity.masteryKey}`,
+      es: `componentes: ${components} · aprendizaje registrado como ${identity.masteryKey}`,
+      "pt-BR": `componentes: ${components} · aprendizagem registrada como ${identity.masteryKey}`,
+      ru: `компоненты: ${components} · статус изучения хранится как ${identity.masteryKey}`,
+      it: `componenti: ${components} · apprendimento registrato come ${identity.masteryKey}`,
+      tr: `bileşenler: ${components} · öğrenme durumu ${identity.masteryKey} olarak izlenir`,
+      vi: `thành phần: ${components} · trạng thái học được lưu dưới ${identity.masteryKey}`,
+      id: `komponen: ${components} · status belajar dicatat sebagai ${identity.masteryKey}`,
+      th: `องค์ประกอบ: ${components} · บันทึกสถานะการเรียนรู้เป็น ${identity.masteryKey}`,
+      ar: `المكوّنات: ${components} · تُسجّل حالة التعلّم باسم ${identity.masteryKey}`,
+      en: `components: ${components} · mastery tracked as ${identity.masteryKey}`,
+    },
+  } as const;
+
+  if (identity.kind === "shared-inflection") {
+    return messages.shared[code as keyof typeof messages.shared] || messages.shared.en;
+  }
+  if (identity.kind === "independent-inflection") {
+    return messages.independent[code as keyof typeof messages.independent] || messages.independent.en;
+  }
+  if (identity.kind === "compound" && components) {
+    return messages.compound[code as keyof typeof messages.compound] || messages.compound.en;
+  }
+  return undefined;
+}
+
 export function describeLearningIdentity(
   surface: string,
   lemma: string,
   partOfSpeech?: string,
+  learnerLanguageCode?: SupportedLearnerLanguageCode,
 ): string | undefined {
   const formLabel = describeEnglishWordForm(surface, lemma, partOfSpeech);
-  const identity = resolveMasteryIdentity(surface, lemma);
-  const details: string[] = [];
-
-  if (formLabel) {
-    details.push(formLabel);
-  }
-
-  if (identity.kind === "compound" && identity.components?.length) {
-    details.push(`components: ${identity.components.join(" + ")}`);
-    details.push(`mastery tracked as ${identity.masteryKey}`);
-  } else if (identity.kind === "shared-inflection") {
-    details.push(`mastery shared with ${identity.masteryKey}`);
-  } else if (identity.kind === "independent-inflection") {
-    details.push(`mastery kept separate from ${identity.lexicalLemma || lemma}`);
-  }
-
-  return details.length ? details.join(" · ") : undefined;
+  const masteryNote = masteryIdentityNote(surface, lemma, learnerLanguageCode);
+  return [formLabel, masteryNote].filter(Boolean).join(" · ") || undefined;
 }
 
 function collectSenses(
@@ -280,7 +345,8 @@ export async function lookupStructuredLexicalSenses(
   return {
     surface,
     lemma: lemma || normalized,
-    wordFormLabel: describeLearningIdentity(surface, lemma || normalized, lexicalPos),
+    wordFormLabel: describeEnglishWordForm(surface, lemma || normalized, lexicalPos),
+    learnerLanguageCode: options.learnerLanguageCode,
     senses,
   };
 }
@@ -362,7 +428,12 @@ export function buildStructuredLexicalMetadata(
 
   return {
     lexicalLemma: lookup.lemma || undefined,
-    wordFormLabel: lookup.wordFormLabel,
+    wordFormLabel: describeLearningIdentity(
+      lookup.surface,
+      lookup.lemma,
+      primarySense?.partOfSpeech,
+      lookup.learnerLanguageCode,
+    ) || lookup.wordFormLabel,
     contextualPartOfSpeech: primarySense?.partOfSpeech,
     semanticHint: primarySense ? compactGloss(primarySense.gloss) : undefined,
     alternativeMeanings: alternativeMeanings.length ? alternativeMeanings : undefined,
