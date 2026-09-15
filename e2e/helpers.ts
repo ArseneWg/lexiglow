@@ -13,7 +13,6 @@ export interface SeedUserSettings {
   unmasteredOverrides?: string[];
   ignoredWords?: string[];
   wordReviewTrigger?: "doubleClick" | "selection";
-  learningProgress?: Record<string, unknown>;
 }
 
 export interface SeedTranslatorSettings {
@@ -37,12 +36,12 @@ export async function clearExtensionStorage(worker: Worker) {
 
 export async function seedUserSettings(worker: Worker, overrides: SeedUserSettings = {}) {
   const value = {
+    schemaVersion: 3,
     knownBaseRank: 2500,
     masteredOverrides: [],
     unmasteredOverrides: [],
     ignoredWords: [],
     wordReviewTrigger: "doubleClick" as const,
-    learningProgress: {},
     ...overrides,
   };
 
