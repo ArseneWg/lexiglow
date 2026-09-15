@@ -21,20 +21,6 @@ test("Options exports a secret-free backup and restores learning data without lo
     knownBaseRank: 2750,
     masteredOverrides: ["obfuscation"],
     ignoredWords: ["boilerplate"],
-    learningProgress: {
-      obfuscation: {
-        status: "known",
-        familiarity: 1,
-        exposures: 3,
-        successes: 2,
-      },
-      boilerplate: {
-        status: "ignored",
-        familiarity: 0,
-        exposures: 0,
-        successes: 0,
-      },
-    },
   });
   await seedTranslatorSettings(extensionWorker, {
     providerBaseUrl: "http://llm.test/v1",
@@ -71,6 +57,7 @@ test("Options exports a secret-free backup and restores learning data without lo
     masteredOverrides: expect.arrayContaining(["obfuscation"]),
     ignoredWords: expect.arrayContaining(["boilerplate"]),
   }));
+  expect(exported.userSettings).not.toHaveProperty("learningProgress");
   expect(exported.translatorSettingsState?.profiles?.[0]).toEqual(expect.objectContaining({
     providerModel: "portable-model",
     apiKey: "",
@@ -84,20 +71,6 @@ test("Options exports a secret-free backup and restores learning data without lo
       masteredOverrides: ["circumlocution"],
       unmasteredOverrides: ["obfuscation"],
       ignoredWords: [],
-      learningProgress: {
-        circumlocution: {
-          status: "known",
-          familiarity: 1,
-          exposures: 2,
-          successes: 1,
-        },
-        obfuscation: {
-          status: "learning",
-          familiarity: 0.25,
-          exposures: 0,
-          successes: 2,
-        },
-      },
     },
   };
 
@@ -113,11 +86,12 @@ test("Options exports a secret-free backup and restores learning data without lo
 
   const stored = await readUserSettings(extensionWorker);
   expect(stored).toEqual(expect.objectContaining({
-    schemaVersion: 2,
+    schemaVersion: 3,
     knownBaseRank: 4100,
     masteredOverrides: expect.arrayContaining(["circumlocution"]),
     unmasteredOverrides: expect.arrayContaining(["obfuscation"]),
   }));
+  expect(stored).not.toHaveProperty("learningProgress");
 
   const publicTranslatorState = await extensionWorker.evaluate(async () => {
     const result = await chrome.storage.local.get("translatorSettings");

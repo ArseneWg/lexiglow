@@ -51,7 +51,7 @@ test("hover translation can be marked Known and survives a page reload", async (
   expect(await getHighlightTexts(page)).not.toContain("obfuscation");
 });
 
-test("double-clicking a known word can put it back into spaced relearning", async ({
+test("double-clicking a known word can put it back into the unknown set", async ({
   context,
   page,
   extensionWorker,
@@ -70,9 +70,8 @@ test("double-clicking a known word can put it back into spaced relearning", asyn
   await expect.poll(async () => (await getHighlightTexts(page)).includes("work")).toBe(true);
 
   const saved = await readUserSettings(extensionWorker);
-  const progress = saved?.learningProgress as Record<string, { status?: string }> | undefined;
   expect(saved?.unmasteredOverrides).toEqual(expect.arrayContaining(["work"]));
-  expect(progress?.work?.status).toBe("learning");
+  expect(saved).not.toHaveProperty("learningProgress");
 });
 
 test("changing the vocabulary threshold in the popup updates the active page", async ({

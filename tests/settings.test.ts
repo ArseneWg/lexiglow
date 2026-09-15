@@ -107,13 +107,14 @@ describe("settings resolution", () => {
     expect(sanitizeSettings({ knownBaseRank: 100 }).wordReviewTrigger).toBe("doubleClick");
   });
 
-  test("preserves single-word review trigger when clearing learning progress", () => {
+  test("preserves single-word review trigger when clearing learning state", () => {
     const settings = setWordMastered(updateWordReviewTrigger(DEFAULT_SETTINGS, "selection"), "cursor");
     const cleared = clearLearningProgress(settings);
 
     expect(cleared.wordReviewTrigger).toBe("selection");
     expect(cleared.masteredOverrides).toEqual([]);
-    expect(cleared.learningProgress).toEqual({});
+    expect(cleared.unmasteredOverrides).toEqual([]);
+    expect(cleared.ignoredWords).toEqual([]);
   });
 
   test("subtracts forced-unmastered base words from total known count", () => {
