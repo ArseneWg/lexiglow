@@ -299,3 +299,24 @@ export async function saveTranslatorSettingsState(state: TranslatorSettingsState
     [STORAGE_TRANSLATOR_SETTINGS_KEY]: stripStateSecrets(sanitized),
   });
 }
+
+// chrome.storage and IndexedDB cannot share a transaction. Publish both public
+// records together, and restore the previous private keys if publication fails.
+export async function restoreLearningData(
+  settings: UserSettings,
+  translatorState: TranslatorSettingsState,
+): Promise<void> {
+  if (!isTrustedExtensionContext()) throw new Error("Import requires an extension page.");
+  const previous = await getTranslatorSettingsState();
+  const next = sanitizeTranslatorSettingsState(translatorState);
+  try {
+    await replaceTranslatorSecrets(next.profiles);
+    await chrome.storage.local.set({
+      [STORAGE_SETTINGS_KEY]: sanitizeSettings(settings),
+      [STORAGE_TRANSLATOR_SETTINGS_KEY]: stripStateSecrets(next),
+    });
+  } catch (error) {
+    await replaceTranslatorSecrets(previous.profiles);
+    throw error;
+  }
+}

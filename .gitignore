@@ -11,3 +11,8 @@ src/generated/lexicon.ts
 /3.png
 /data/BNC_COCA_lists.xlsx
 /module_notes/
+
+# Generated local packages and browser evidence
+/release/
+/test-results/
+/playwright-report/

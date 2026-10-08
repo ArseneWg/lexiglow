@@ -48,6 +48,8 @@ function assignRefs() {
 }
 
 function renderShell() {
+  document.documentElement.lang = translatorSettings.learnerLanguageCode;
+  document.documentElement.dir = translatorSettings.learnerLanguageCode === "ar" ? "rtl" : "ltr";
   appRoot.innerHTML = `
     <main class="panel">
       <section class="hero">

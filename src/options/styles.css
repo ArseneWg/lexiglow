@@ -251,3 +251,5 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+fieldset.rank-controls { border: 0; padding: 0; margin: 0; min-width: 0; }

@@ -11,6 +11,7 @@ import {
   getTranslatorSettings,
   getTranslatorSettingsState,
   saveSettings,
+  restoreLearningData,
   saveTranslatorSettings,
   saveTranslatorSettingsState,
 } from "../src/shared/storage";
@@ -67,6 +68,20 @@ describe("settings storage", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  test("failed import publication leaves learning/public profiles and secrets unchanged", async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, knownBaseRank: 2750 });
+    const state = { activeProfileId: "local", profiles: [{ ...DEFAULT_TRANSLATOR_PROFILE, id: "local", apiKey: "synthetic-secret" }] };
+    await saveTranslatorSettingsState(state);
+    const before = structuredClone(localStore);
+    localArea.set.mockRejectedValueOnce(new Error("Simulated storage failure"));
+    await expect(restoreLearningData({ ...DEFAULT_SETTINGS, knownBaseRank: 999 }, { ...state, profiles: [{ ...state.profiles[0]!, apiKey: "" }] })).rejects.toThrow("Simulated storage failure");
+    expect(localStore).toEqual(before);
+    expect((await getTranslatorSettingsState()).profiles[0]?.apiKey).toBe("synthetic-secret");
+    await restoreLearningData({ ...DEFAULT_SETTINGS, knownBaseRank: 999 }, state);
+    expect((await getSettings()).knownBaseRank).toBe(999);
+    expect(localArea.set).toHaveBeenLastCalledWith(expect.objectContaining({ userSettings: expect.anything(), translatorSettings: expect.anything() }));
   });
 
   test("prefers local settings over sync", async () => {

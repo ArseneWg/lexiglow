@@ -271,7 +271,7 @@ export function getLlmCacheSignature(settings: Pick<TranslatorSettings, "llmProv
 }
 
 class TranslatorFallbackError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public readonly status = 0, public readonly reason: "format" | "network" = "format") {
     super(message);
     this.name = "TranslatorFallbackError";
   }
@@ -1016,7 +1016,7 @@ export async function translateWithLlm({
       error instanceof LlmProviderFormatError
       || shouldFallbackToGoogleOnLlmError(error)
     ) {
-      throw new TranslatorFallbackError(message);
+      throw new TranslatorFallbackError(message, getLlmRequestStatus(error), error instanceof LlmProviderFormatError ? "format" : "network");
     }
 
     throw error;
@@ -1108,7 +1108,7 @@ context: ${context}`,
       error instanceof LlmProviderFormatError
       || shouldFallbackToGoogleOnLlmError(error)
     ) {
-      throw new TranslatorFallbackError(message);
+      throw new TranslatorFallbackError(message, getLlmRequestStatus(error), error instanceof LlmProviderFormatError ? "format" : "network");
     }
 
     throw error;
@@ -1313,4 +1313,17 @@ export function getTranslatorCacheTtlMs(settings: TranslatorSettings): number {
 
 export function isTranslatorFallbackError(error: unknown): boolean {
   return error instanceof TranslatorFallbackError;
+}
+
+export function translationErrorMessage(error: unknown, language: SupportedLearnerLanguageCode): string {
+  const status = error instanceof TranslatorFallbackError ? error.status : getLlmRequestStatus(error);
+  if (error instanceof TranslatorFallbackError && error.message === "Missing LLM API key.") {
+    return t(language, "errorEnterApiKey");
+  }
+  if (status === 401 || status === 403) return t(language, "errorTranslationAuth");
+  if (status === 429 || status === 402) return t(language, "errorTranslationRateLimit");
+  if (error instanceof LlmProviderFormatError || (error instanceof TranslatorFallbackError && !status && error.reason === "format")) {
+    return t(language, "errorTranslationFormat");
+  }
+  return t(language, "errorTranslationNetwork");
 }

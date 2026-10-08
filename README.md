@@ -65,15 +65,15 @@ The internal A1-C1 labels are vocabulary-size heuristics used to tune explanatio
 
 In addition to unit tests, the project uses Playwright to launch a real persistent Chromium profile with the MV3 extension loaded. The browser suite exercises the service worker, content script, Shadow DOM tooltip, CSS Highlight API, selections, Popup / Options, dynamic DOM updates, and persisted learning state.
 
-The current suite contains 30 user-facing Chromium scenarios. In addition to the original reading-flow coverage, it now verifies Options backup/download/import, API-key redaction and same-profile secret preservation, LLM 429 and malformed-response fallback, explicit 401 failure UI without fallback, stale hover-response suppression, and prevention of late responses resurrecting a closed tooltip.
+The browser suite covers reading, learning, settings and data portability. In addition to the original reading-flow coverage, it now verifies Options backup/download/import, API-key redaction and same-profile secret preservation, LLM 429 and malformed-response fallback, explicit 401 failure UI without fallback, stale hover-response suppression, and prevention of late responses resurrecting a closed tooltip.
 
-The verified CI baseline is 17 Vitest files / 158 unit tests plus 30 / 30 Playwright Chromium extension E2E tests. Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness. Failed E2E runs retain Playwright traces, screenshots, HTML reports, and test-result diagnostics for investigation. A separate non-blocking public-site smoke workflow continues to exercise GitHub, Hacker News, MDN, web.dev, React docs, and Reddit when its CI egress is accepted.
+Run `npm test` and `npm run test:e2e` for the current test inventory and results. Translation, dictionary, and LLM traffic is deterministically mocked at BrowserContext level so CI does not depend on real API keys or model randomness. Failed E2E runs retain Playwright traces, screenshots, HTML reports, and test-result diagnostics for investigation. A separate non-blocking public-site smoke workflow continues to exercise GitHub, Hacker News, MDN, web.dev, React docs, and Reddit when its CI egress is accepted.
 
 ## Long-term data safety and release artifacts
 
 - User learning settings now carry an explicit schema version. Older local records are sanitized and migrated to schema v2 once; records from a newer schema are never overwritten merely by reading them from an older build.
 - Options includes Backup and restore. The export contains long-term learning state and non-secret translator profile settings. API keys are always redacted from the JSON backup.
-- Import validates the LexiGlow backup format/version and size, sanitizes legacy-shaped settings, and preserves an existing local API key only when the imported profile has the same profile ID.
+- Import validates the LexiGlow backup format/version and size, sanitizes legacy-shaped settings, and shows a replacement summary before writing data. Local API keys are retained only when profile ID, provider and normalized endpoint all match; a changed destination never inherits a key. Cancel leaves data and drafts untouched.
 - `npm run release:package` emits `release/lexiglow-<version>.zip` plus `SHA256SUMS`. The package contains only `manifest.json` and production `dist/**` files, and fails if `package.json` and the manifest disagree on version or if a manifest-referenced runtime file is missing.
 - PR CI packages the same source twice and requires identical SHA256 output. Tag releases additionally require `vX.Y.Z` to match `package.json`, then run the full unit/build/browser gate before uploading the ZIP artifact.
 - Tooltip lifecycle state is represented explicitly as hidden, hover-word, review-word, selection, analysis-prompt, or analysis instead of independent booleans/string flags that could drift apart during async interactions.
@@ -90,7 +90,7 @@ If the page contains sensitive information, review the data-processing terms of 
 ## Build and install
 
 ```bash
-npm install
+npm ci
 npm run fetch:lexicon
 npm run build
 ```
@@ -100,7 +100,14 @@ Then load the extension in Chrome:
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Choose Load unpacked.
-4. Select the project root or `dist` output as appropriate for your local workflow.
+4. Select the built `dist` folder (it contains its own runtime manifest). Loading the project root also works, but includes unnecessary development files in the extension directory.
+5. Refresh English tabs after installing, updating or re-enabling the extension.
+
+Use Node.js 22 or a supported newer version. To build a minimal offline install bundle, run `npm run release:package` after the build, then unzip `release/lexiglow-<version>.zip` and load the extracted folder containing the root `manifest.json`. Chrome cannot load a ZIP directly. `SHA256SUMS` records its checksum; building and packaging identical sources twice should produce the same checksum. This command creates local files only; it does not publish a release.
+
+Start with Google lookup: no AI key is required. For contextual translation, English explanation or sentence analysis, configure your provider and save the translation settings first. Provider billing is separate. If fallback is enabled, the card explains why Google was used instead. A local OpenAI-compatible server may omit the API key. Language UI coverage varies: newer controls fall back to English when a translation is missing.
+
+After a code update, rebuild, click Reload on the extension card and refresh your reading tab. If no highlights appear, try an English HTML page rather than a browser internal page, PDF, editor or code block. Automatic highlighting respects declared non-English language regions; it does not infer the language of untagged ASCII text.
 
 Suggested smoke test:
 

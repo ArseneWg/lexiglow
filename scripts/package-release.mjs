@@ -3,9 +3,10 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
-const root = path.resolve(new URL("..", import.meta.url).pathname);
+const root = fileURLToPath(new URL("..", import.meta.url));
 const releaseDir = path.join(root, "release");
 const distDir = path.join(root, "dist");
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));

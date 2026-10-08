@@ -4,6 +4,7 @@ import { t } from "../shared/i18n";
 import { LEXICON_WORDS, lookupRank, resolveLookupLemma } from "../shared/lexicon";
 import {
   createLearningDataExport,
+  LearningDataImportError,
   MAX_LEARNING_DATA_IMPORT_BYTES,
   mergeImportedTranslatorSecrets,
   parseLearningDataExport,
@@ -27,7 +28,7 @@ import {
   getSettings,
   getTranslatorSettingsState,
   saveSettings,
-  saveTranslatorSettingsState,
+  restoreLearningData,
 } from "../shared/storage";
 import {
   DEFAULT_TRANSLATOR_PROFILE,
@@ -90,8 +91,16 @@ let cacheDurationValue!: HTMLInputElement;
 let cacheDurationUnit!: HTMLSelectElement;
 let fallbackToGoogle!: HTMLInputElement;
 let saveTranslatorButton!: HTMLButtonElement;
-let settingsStatusEls!: HTMLElement[];
-let settingsStatusTimer: number | null = null;
+type StatusScope = "learning" | "translator" | "backup" | "reset";
+const statusTimers = new Map<StatusScope, number>();
+let dataOperationPending = false;
+let translatorSavePending = false;
+
+function syncBusyControls() {
+  importDataButton.disabled = dataOperationPending || translatorSavePending;
+  clearButton.disabled = dataOperationPending || translatorSavePending;
+  document.querySelector<HTMLFieldSetElement>("#translatorFields")!.disabled = dataOperationPending || translatorSavePending;
+}
 let masteredList!: HTMLElement;
 let ignoredList!: HTMLElement;
 let exportDataButton!: HTMLButtonElement;
@@ -116,11 +125,15 @@ function renderLlmProviderOptionsMarkup(): string {
   return LLM_PROVIDER_OPTIONS.map((provider) => `<option value="${provider.kind}">${provider.label}</option>`).join("");
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+}
+
 function renderProfileOptionsMarkup(): string {
   return translatorSettingsState.profiles
     .map((profile) => {
       const selected = profile.id === translatorSettingsState.activeProfileId ? ' selected' : "";
-      return `<option value="${profile.id}"${selected}>${profile.name}</option>`;
+      return `<option value="${escapeHtml(profile.id)}"${selected}>${escapeHtml(profile.name)}</option>`;
     })
     .join("");
 }
@@ -221,7 +234,6 @@ function assignRefs() {
   cacheDurationUnit = document.querySelector<HTMLSelectElement>("#cacheDurationUnit")!;
   fallbackToGoogle = document.querySelector<HTMLInputElement>("#fallbackToGoogle")!;
   saveTranslatorButton = document.querySelector<HTMLButtonElement>("#saveTranslatorButton")!;
-  settingsStatusEls = [...document.querySelectorAll<HTMLElement>(".settings-status")];
   masteredList = document.querySelector<HTMLElement>("#masteredList")!;
   ignoredList = document.querySelector<HTMLElement>("#ignoredList")!;
   exportDataButton = document.querySelector<HTMLButtonElement>("#exportDataButton")!;
@@ -401,12 +413,19 @@ function syncProviderFieldPolicy() {
     : ui("optionsProviderNativeHint", { provider: definition.label, api: definition.nativeApi });
 }
 
-function renderAll() {
+function renderLearning() {
   setRankInputs(settings.knownBaseRank);
   totalKnownCount.textContent = String(countTotalKnown(settings));
   extraKnownCount.textContent = String(countExtraMastered(settings));
   ignoredCount.textContent = String(settings.ignoredWords.length);
   wordReviewTrigger.value = settings.wordReviewTrigger;
+  renderSearch();
+  renderMasteredList();
+  renderIgnoredList();
+}
+
+function renderAll() {
+  renderLearning();
   profileSelect.value = translatorSettingsState.activeProfileId;
   deleteProfileButton.disabled = translatorSettingsState.profiles.length <= 1;
   learnerLanguageCode.value = translatorSettings.learnerLanguageCode;
@@ -420,9 +439,6 @@ function renderAll() {
   cacheDurationValue.value = String(translatorSettings.cacheDurationValue);
   cacheDurationUnit.value = translatorSettings.cacheDurationUnit;
   fallbackToGoogle.checked = translatorSettings.fallbackToGoogle;
-  renderSearch();
-  renderMasteredList();
-  renderIgnoredList();
 }
 
 function formatStatusTime(): string {
@@ -433,25 +449,20 @@ function formatStatusTime(): string {
   });
 }
 
-function showSettingsStatus(kind: "pending" | "success" | "error", text: string, clearAfterMs = 0) {
-  if (settingsStatusTimer) {
-    window.clearTimeout(settingsStatusTimer);
-    settingsStatusTimer = null;
-  }
-
-  for (const element of settingsStatusEls) {
-    element.textContent = text;
-    element.dataset.kind = kind;
-  }
-
+function showSettingsStatus(kind: "pending" | "success" | "error", text: string, clearAfterMs = 0, scope: StatusScope = "translator") {
+  const timer = statusTimers.get(scope);
+  if (timer) window.clearTimeout(timer);
+  statusTimers.delete(scope);
+  const element = document.querySelector<HTMLElement>(`#${scope}Status`);
+  if (!element) return;
+  element.textContent = text;
+  element.dataset.kind = kind;
   if (clearAfterMs > 0) {
-    settingsStatusTimer = window.setTimeout(() => {
-      for (const element of settingsStatusEls) {
-        element.textContent = "";
-        delete element.dataset.kind;
-      }
-      settingsStatusTimer = null;
-    }, clearAfterMs);
+    statusTimers.set(scope, window.setTimeout(() => {
+      element.textContent = "";
+      delete element.dataset.kind;
+      statusTimers.delete(scope);
+    }, clearAfterMs));
   }
 }
 
@@ -459,16 +470,16 @@ async function persistSettings(nextSettings: UserSettings, showStatus = false) {
   settings = nextSettings;
   try {
     if (showStatus) {
-      showSettingsStatus("pending", ui("optionsSavePending"));
+      showSettingsStatus("pending", ui("optionsSavePending"), 0, "learning");
     }
     await saveSettings(settings);
-    renderAll();
+    renderLearning();
     if (showStatus) {
-      showSettingsStatus("success", ui("optionsSaveSuccess", { time: formatStatusTime() }), 2600);
+      showSettingsStatus("success", ui("optionsSaveSuccess", { time: formatStatusTime() }), 2600, "learning");
     }
   } catch (error) {
     if (showStatus) {
-      showSettingsStatus("error", ui("optionsSaveFailed", { time: formatStatusTime() }));
+      showSettingsStatus("error", ui("optionsSaveFailed", { time: formatStatusTime() }), 0, "learning");
     }
     throw error;
   }
@@ -484,23 +495,35 @@ function downloadLearningDataExport() {
   link.download = `lexiglow-learning-data-${date}.json`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  showSettingsStatus("success", ui("optionsExportDataSuccess"), 2600);
+  showSettingsStatus("success", ui("optionsExportDataSuccess"), 2600, "backup");
 }
 
 async function importLearningDataFile(file: File) {
   if (file.size > MAX_LEARNING_DATA_IMPORT_BYTES) {
-    throw new Error("Learning data file is too large.");
+    throw new LearningDataImportError("tooLarge", "Learning data file is too large.");
   }
-
   const parsed = parseLearningDataExport(await file.text());
-  const nextTranslatorState = mergeImportedTranslatorSecrets(parsed.translatorSettingsState, translatorSettingsState);
-  await saveSettings(parsed.userSettings);
-  await saveTranslatorSettingsState(nextTranslatorState);
+  const currentTranslatorState = await getTranslatorSettingsState();
+  const nextTranslatorState = mergeImportedTranslatorSecrets(parsed.translatorSettingsState, currentTranslatorState);
+  const retainedKeys = nextTranslatorState.profiles.filter((profile) => profile.apiKey).length;
+  const confirmed = window.confirm(ui("optionsImportDataConfirm", {
+    threshold: parsed.userSettings.knownBaseRank,
+    known: parsed.userSettings.masteredOverrides.length,
+    review: parsed.userSettings.unmasteredOverrides.length,
+    ignored: parsed.userSettings.ignoredWords.length,
+    profiles: nextTranslatorState.profiles.length,
+    keys: retainedKeys,
+  }));
+  if (!confirmed) {
+    showSettingsStatus("success", ui("optionsOperationCancelled"), 2600, "backup");
+    return;
+  }
+  await restoreLearningData(parsed.userSettings, nextTranslatorState);
   settings = await getSettings();
   setTranslatorSettingsState(await getTranslatorSettingsState());
   renderShell();
   renderAll();
-  showSettingsStatus("success", ui("optionsImportDataSuccess"), 3200);
+  showSettingsStatus("success", ui("optionsImportDataSuccess"), 3200, "backup");
 }
 
 function bindEvents() {
@@ -584,17 +607,41 @@ function bindEvents() {
 
   importDataInput.addEventListener("change", async () => {
     const file = importDataInput.files?.[0];
-    if (!file) return;
-    showSettingsStatus("pending", ui("optionsImportDataPending"));
+    if (!file || dataOperationPending || translatorSavePending) return;
+    dataOperationPending = true;
+    syncBusyControls();
+    showSettingsStatus("pending", ui("optionsImportDataPending"), 0, "backup");
     try {
       await importLearningDataFile(file);
-    } catch {
-      showSettingsStatus("error", ui("optionsImportDataFailed"));
+    } catch (error) {
+      const key = error instanceof LearningDataImportError
+        ? ({ tooLarge: "optionsImportTooLarge", invalidJson: "optionsImportInvalidJson", invalidFormat: "optionsImportInvalidFormat", unsupportedVersion: "optionsImportUnsupportedVersion" } as const)[error.code]
+        : "optionsImportDataFailed";
+      showSettingsStatus("error", ui(key), 0, "backup");
+    } finally {
+      importDataInput.value = "";
+      dataOperationPending = false;
+      syncBusyControls();
     }
   });
 
   clearButton.addEventListener("click", async () => {
-    await persistSettings(clearLearningProgress(settings));
+    if (dataOperationPending || translatorSavePending) return;
+    if (!window.confirm(ui("optionsResetConfirm"))) {
+      showSettingsStatus("success", ui("optionsOperationCancelled"), 2600, "reset");
+      return;
+    }
+    dataOperationPending = true;
+    syncBusyControls();
+    try {
+      await persistSettings(clearLearningProgress(settings));
+      showSettingsStatus("success", ui("optionsResetSuccess"), 2600, "reset");
+    } catch {
+      showSettingsStatus("error", ui("optionsSaveFailed", { time: formatStatusTime() }), 0, "reset");
+    } finally {
+      dataOperationPending = false;
+      syncBusyControls();
+    }
   });
 
   profileSelect.addEventListener("change", () => {
@@ -696,9 +743,11 @@ function bindEvents() {
   });
 
   saveTranslatorButton.addEventListener("click", async () => {
+    if (dataOperationPending || translatorSavePending) return;
     syncActiveProfileFromForm();
     showSettingsStatus("pending", ui("optionsSavePending"));
-    saveTranslatorButton.disabled = true;
+    translatorSavePending = true;
+    syncBusyControls();
 
     try {
       const response = await runtimeSend<TranslatorSettingsStateResponse>({
@@ -719,7 +768,8 @@ function bindEvents() {
     } catch {
       showSettingsStatus("error", ui("optionsSaveFailed", { time: formatStatusTime() }));
     } finally {
-      saveTranslatorButton.disabled = false;
+      translatorSavePending = false;
+      syncBusyControls();
     }
   });
 
@@ -732,6 +782,10 @@ function bindEvents() {
 }
 
 function renderShell() {
+  for (const timer of statusTimers.values()) window.clearTimeout(timer);
+  statusTimers.clear();
+  document.documentElement.lang = translatorSettings.learnerLanguageCode;
+  document.documentElement.dir = translatorSettings.learnerLanguageCode === "ar" ? "rtl" : "ltr";
   appRoot.innerHTML = `
     <main class="page">
       <section class="hero">
@@ -770,7 +824,7 @@ function renderShell() {
           <option value="selection">${ui("optionsWordReviewTriggerSelection")}</option>
         </select>
         <p class="muted">${ui("optionsWordReviewTriggerDescription")}</p>
-        <p class="settings-status" role="status" aria-live="polite"></p>
+        <p id="learningStatus" class="settings-status" role="status" aria-live="polite"></p>
         <input id="searchInput" type="search" placeholder="${ui("optionsSearchPlaceholder")}" />
         <p class="muted">${ui("optionsSearchDescription")}</p>
         <div class="search-results" id="searchResults"></div>
@@ -778,7 +832,7 @@ function renderShell() {
       <section class="panel">
         <h2>${ui("optionsTranslationSettings")}</h2>
         <p class="muted">${ui("optionsTranslationDescription")}</p>
-        <div class="rank-controls">
+        <fieldset class="rank-controls" id="translatorFields">
           <div class="profile-toolbar">
             <label class="muted" for="profileSelect">${ui("optionsActiveProfile")}</label>
             <select id="profileSelect">${renderProfileOptionsMarkup()}</select>
@@ -799,12 +853,13 @@ function renderShell() {
           <label class="muted" for="llmProvider">${ui("optionsLlmProvider")}</label>
           <select id="llmProvider">${renderLlmProviderOptionsMarkup()}</select>
           <label class="muted" for="providerBaseUrl">${ui("optionsProviderBaseUrl")}</label>
-          <input id="providerBaseUrl" type="text" placeholder="${ui("optionsProviderBaseUrl")}" />
+          <input id="providerBaseUrl" dir="ltr" type="text" placeholder="${ui("optionsProviderBaseUrl")}" />
           <label class="muted" for="providerModel">${ui("optionsProviderModel")}</label>
-          <input id="providerModel" type="text" placeholder="${ui("optionsProviderModel")}" />
+          <input id="providerModel" dir="ltr" type="text" placeholder="${ui("optionsProviderModel")}" />
           <label class="muted" for="providerApiKey">${ui("optionsProviderApiKey")}</label>
-          <input id="providerApiKey" type="password" placeholder="${ui("optionsApiKeyPlaceholder")}" />
+          <input id="providerApiKey" dir="ltr" type="password" placeholder="${ui("optionsApiKeyPlaceholder")}" />
           <p class="muted" id="providerHint"></p>
+          <label class="muted" for="llmDisplayMode">${ui("optionsDisplayModeLabel")}</label>
           <select id="llmDisplayMode">
             <option value="word">${ui("optionsDisplayModeWord")}</option>
             <option value="sentence">${ui("optionsDisplayModeSentence")}</option>
@@ -822,8 +877,8 @@ function renderShell() {
           <div class="word-actions">
             <button class="primary" id="saveTranslatorButton">${ui("optionsSaveTranslationSettings")}</button>
           </div>
-          <p class="settings-status" role="status" aria-live="polite"></p>
-        </div>
+          <p id="translatorStatus" class="settings-status" role="status" aria-live="polite"></p>
+        </fieldset>
       </section>
       <section class="grid">
         <section class="panel">
@@ -844,18 +899,20 @@ function renderShell() {
           <button class="secondary" id="importDataButton" type="button">${ui("optionsImportData")}</button>
           <input id="importDataInput" type="file" accept="application/json,.json" hidden />
         </div>
-        <p class="settings-status" role="status" aria-live="polite"></p>
+        <p id="backupStatus" class="settings-status" role="status" aria-live="polite"></p>
       </section>
       <section class="panel">
         <h2>${ui("optionsReset")}</h2>
         <p class="muted">${ui("optionsResetDescription")}</p>
         <button class="danger" id="clearButton">${ui("optionsResetButton")}</button>
+        <p id="resetStatus" class="settings-status" role="status" aria-live="polite"></p>
       </section>
     </main>
   `;
 
   assignRefs();
   bindEvents();
+  syncBusyControls();
 }
 
 async function boot() {

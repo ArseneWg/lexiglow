@@ -98,7 +98,7 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 
 项目除了单元测试外，还会用 Playwright 启动真实的 Chromium persistent profile，并加载 MV3 扩展运行浏览器 E2E。测试覆盖真正的 service worker、content script、Shadow DOM tooltip、CSS Highlight API、Selection / Range、Popup / Options、动态 DOM 和本地持久化状态。
 
-当前共有 **30 条 Chromium 用户流程**，除原有阅读流覆盖外，还新增数据备份恢复、网络失败与异步竞态场景，包括：
+浏览器回归覆盖阅读、学习、设置及备份恢复流程，除原有阅读流覆盖外，还新增数据备份恢复、网络失败与异步竞态场景，包括：
 
 - 悬停翻译 → 已掌握 → 刷新后保持状态
 - 双击已掌握词 → 继续学习 / spaced relearning
@@ -123,13 +123,13 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 - 慢返回的旧 hover 请求不能覆盖新词 tooltip
 - 用户关闭 selection tooltip 后，迟到的 LLM 响应不能把 UI 重新弹出来
 
-当前验证基线为 **17 个 Vitest 文件 / 158 条单元测试 + 30 / 30 条 Playwright Chromium 扩展 E2E**。翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。E2E 失败时会保留 trace、截图、HTML 报告和测试结果 diagnostics。另有独立、非阻塞的真实公网 Site Smoke 持续覆盖 GitHub、Hacker News、MDN、web.dev、React 文档，以及 CI 出口未被限制时的 Reddit。
+当前测试清单及结果请以 `npm test` 与 `npm run test:e2e` 输出为准。翻译、词典和 LLM 请求都在 BrowserContext 网络层使用确定性 mock，因此 CI 不需要真实 API Key，也不会受模型随机性影响。E2E 失败时会保留 trace、截图、HTML 报告和测试结果 diagnostics。另有独立、非阻塞的真实公网 Site Smoke 持续覆盖 GitHub、Hacker News、MDN、web.dev、React 文档，以及 CI 出口未被限制时的 Reddit。
 
 ## 长期数据安全与发布产物
 
 - 用户学习设置现在带明确 schema version。旧的本地记录会净化并一次性迁移到 schema v2；如果读到比当前扩展更新的 schema，仅生成兼容运行视图，不会因为一次读取就把未来版本记录回写覆盖。
 - Options 新增“备份与恢复”。导出包含长期学习状态和不含 secret 的翻译 profile 配置，JSON 备份永远不会写入 API Key。
-- 导入会校验 LexiGlow 备份格式、版本和大小，并净化旧结构；只有导入 profile ID 与本机已有 profile ID 相同，才会继续保留该 profile 的本机 API Key。
+- 导入会校验 LexiGlow 备份格式、版本和大小，并净化旧结构；导入前会显示替换摘要；只有 profile ID、提供商及规范化端点全部一致，才保留本机 API Key，变更目标不会继承密钥。取消不会改变存储数据或翻译草稿。
 - `npm run release:package` 会生成 `release/lexiglow-<version>.zip` 与 `SHA256SUMS`。ZIP 只包含 `manifest.json` 和生产 `dist/**`，并检查 package/manifest 版本一致性和 manifest 引用的运行文件是否存在。
 - PR CI 会对同一源码连续打包两次并要求 SHA256 完全一致；tag 发布还要求 `vX.Y.Z` 与 `package.json` version 一致，然后重新执行单测、build 和 Chromium E2E 后才上传产物。
 - tooltip 生命周期收敛为显式 session：hidden / hoverWord / reviewWord / selection / analysisPrompt / analysis，避免多个布尔值和字符串状态在异步请求中发生漂移。
@@ -147,7 +147,7 @@ LexiGlow 现在把自动词汇判断当成“保守辅助”，而不是绝对�
 ## 安装使用
 
 ```bash
-npm install
+npm ci
 npm run fetch:lexicon
 npm run build
 ```
@@ -157,7 +157,14 @@ npm run build
 1. 打开 `chrome://extensions`
 2. 开启 `Developer mode`
 3. 点击 `Load unpacked`
-4. 选择项目根目录或 `dist`
+4. 选择构建后的 `dist` 文件夹，其中已有运行所需 manifest。项目根目录也可加载，但会将开发文件包含在扩展目录内。
+5. 安装、更新或重新启用后，刷新已经打开的英文网页。
+
+请使用 Node.js 22 或受支持的更高版本。构建后运行 `npm run release:package` 可生成最小安装包。解压 `release/lexiglow-<version>.zip`，再加载解压后含根层 `manifest.json` 的文件夹；Chrome 无法直接加载 ZIP。`SHA256SUMS` 记录校验值，相同源码连续打包两次应一致。此命令只创建本地产物，不发布 release。
+
+先试 Google 查词，无需 AI Key。语境翻译、英文解释及句子分析需要配置提供商并保存翻译设置，提供商费用另计；本地 OpenAI-compatible 服务可不填 Key。启用回退时，卡片会说明改用 Google 的原因。各语言界面的翻译完整度不同，缺失的新控件文案会回退英文。
+
+更新代码后需重新构建，在扩展卡片点击重新加载，再刷新阅读网页。没有高亮时，先测试英文 HTML 页面；浏览器内部页、PDF、编辑器和代码块并非普通阅读页面。自动高亮会尊重标记为非英文的语言区域，但不会猜测未标注的纯 ASCII 文本语言。
 
 推荐先试这几步：
 
@@ -171,7 +178,7 @@ npm run build
 
 ## 质量门
 
-PR 会执行可复现依赖安装、高危依赖审计、词表生成、TypeScript 类型检查、158 条单元测试、生产构建、两次 release 打包 SHA 一致性校验，以及 30 条真实 Chromium 扩展 E2E。E2E 失败时会保留 trace、截图和 HTML diagnostics；独立 Site Smoke 继续提供真实公网兼容性预警，正式发布前仍建议做一次人工视觉/交互 smoke test。
+PR 会执行可复现依赖安装、高危依赖审计、词表生成、TypeScript 类型检查、全套单元测试、生产构建、两次 release 打包 SHA 一致性校验，以及全套真实 Chromium 扩展 E2E。E2E 失败时会保留 trace、截图和 HTML diagnostics；独立 Site Smoke 继续提供真实公网兼容性预警，正式发布前仍建议做一次人工视觉/交互 smoke test。
 
 ## 许可证与商用
 

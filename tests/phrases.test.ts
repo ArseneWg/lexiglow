@@ -51,3 +51,11 @@ describe("learning phrases", () => {
     expect(findLearningPhraseMatches("account format is different")).toEqual([]);
   });
 });
+
+test("Unicode neighbors block phrase fragments while case conversion preserves offsets", () => {
+  for (const text of ["étake into account", "take into accounté", "中take into account文"]) {
+    expect(findLearningPhraseMatches(text)).toEqual([]);
+  }
+  const [match] = findLearningPhraseMatches("İ take into account the context");
+  expect(match).toEqual(expect.objectContaining({ surface: "take into account", start: 2, end: 19 }));
+});

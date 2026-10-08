@@ -63,6 +63,7 @@ import {
   isTranslatorFallbackError,
   lookupDictionaryPartOfSpeech,
   translateSelectionWithLlm,
+  translationErrorMessage,
   translateWithGoogle,
   translateWithLlm,
 } from "../shared/translator";
@@ -181,11 +182,10 @@ async function translateByChoice({
       throw error;
     }
 
-    return translateWithGoogle({
-      lemma,
-      surface,
-      learnerLanguageCode: translatorSettings.learnerLanguageCode,
-    });
+    const fallback = await translateWithGoogle({ lemma, surface, learnerLanguageCode: translatorSettings.learnerLanguageCode });
+    return { ...fallback, translationNotice: ui(translatorSettings.learnerLanguageCode, "tooltipFallbackGoogle", {
+      reason: translationErrorMessage(error, translatorSettings.learnerLanguageCode),
+    }) };
   }
 }
 
@@ -303,11 +303,10 @@ async function getOrTranslateSelection(
           throw error;
         }
 
-        return translateWithGoogle({
-          lemma: text,
-          surface: text,
-          learnerLanguageCode: translatorSettings.learnerLanguageCode,
-        });
+        const fallback = await translateWithGoogle({ lemma: text, surface: text, learnerLanguageCode: translatorSettings.learnerLanguageCode });
+        return { ...fallback, translationNotice: ui(translatorSettings.learnerLanguageCode, "tooltipFallbackGoogle", {
+          reason: translationErrorMessage(error, translatorSettings.learnerLanguageCode),
+        }) };
       }
     })();
     inFlightTranslations.set(requestKey, pending);
@@ -453,11 +452,12 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
             translation.contextualPartOfSpeech || partOfSpeech,
           ),
           translationProvider: translation.provider,
+          translationNotice: translation.translationNotice,
           cached: translation.cached,
         };
       })()),
     };
-  } catch {
+  } catch (error) {
     const translatorSettings = await getTranslatorSettings();
     return {
       lemma,
@@ -468,7 +468,7 @@ async function handleTranslateWord(message: TranslateWordMessage): Promise<Lexic
       isKnown: false,
       shouldTranslate: true,
       reason: "translate",
-      translation: ui(translatorSettings.learnerLanguageCode, "tooltipTranslationUnavailable"),
+      translation: translationErrorMessage(error, translatorSettings.learnerLanguageCode),
       sentenceTranslation: undefined,
       englishExplanation: undefined,
       contextualPartOfSpeech: undefined,
@@ -619,13 +619,14 @@ async function handleTranslateSelection(
       translation: translation.translation,
       sentenceTranslation: translation.sentenceTranslation,
       translationProvider: translation.provider,
+          translationNotice: translation.translationNotice,
       cached: translation.cached,
     };
-  } catch {
+  } catch (error) {
     const translatorSettings = await getTranslatorSettings();
     return {
       text,
-      translation: ui(translatorSettings.learnerLanguageCode, "tooltipTranslationUnavailable"),
+      translation: translationErrorMessage(error, translatorSettings.learnerLanguageCode),
       translationProvider: message.payload.provider === "llm" ? "llm" : "google-web",
       cached: false,
     };

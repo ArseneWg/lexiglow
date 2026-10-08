@@ -1,3 +1,4 @@
+import { normalizeBaseUrl } from "./llm/providerUtils";
 import { sanitizeSettings } from "./settings";
 import {
   DEFAULT_TRANSLATOR_SETTINGS_STATE,
@@ -12,6 +13,13 @@ import type {
 export const LEARNING_DATA_FORMAT = "lexiglow-learning-data";
 export const LEARNING_DATA_EXPORT_VERSION = 1;
 export const MAX_LEARNING_DATA_IMPORT_BYTES = 5_000_000;
+
+export class LearningDataImportError extends Error {
+  constructor(public readonly code: "tooLarge" | "invalidJson" | "invalidFormat" | "unsupportedVersion", message: string) {
+    super(message);
+    this.name = "LearningDataImportError";
+  }
+}
 
 export interface LearningDataExportBundle {
   format: typeof LEARNING_DATA_FORMAT;
@@ -41,13 +49,13 @@ function parseUnknownJson(input: string | unknown): unknown {
   }
 
   if (new TextEncoder().encode(input).byteLength > MAX_LEARNING_DATA_IMPORT_BYTES) {
-    throw new Error("Learning data file is too large.");
+    throw new LearningDataImportError("tooLarge", "Learning data file is too large.");
   }
 
   try {
     return JSON.parse(input) as unknown;
   } catch {
-    throw new Error("Learning data file is not valid JSON.");
+    throw new LearningDataImportError("invalidJson", "Learning data file is not valid JSON.");
   }
 }
 
@@ -79,16 +87,16 @@ export function parseLearningDataExport(input: string | unknown): LearningDataEx
   const raw = parseUnknownJson(input);
 
   if (!isRecord(raw)) {
-    throw new Error("Learning data file has an invalid root object.");
+    throw new LearningDataImportError("invalidFormat", "Learning data file has an invalid root object.");
   }
   if (raw.format !== LEARNING_DATA_FORMAT) {
-    throw new Error("This file is not a LexiGlow learning-data export.");
+    throw new LearningDataImportError("invalidFormat", "This file is not a LexiGlow learning-data export.");
   }
   if (raw.exportVersion !== LEARNING_DATA_EXPORT_VERSION) {
-    throw new Error("This learning-data export version is not supported.");
+    throw new LearningDataImportError("unsupportedVersion", "This learning-data export version is not supported.");
   }
   if (!isRecord(raw.userSettings)) {
-    throw new Error("Learning data file is missing user settings.");
+    throw new LearningDataImportError("invalidFormat", "Learning data file is missing user settings.");
   }
 
   const translatorState = isRecord(raw.translatorSettingsState)
@@ -108,16 +116,20 @@ export function mergeImportedTranslatorSecrets(
   importedState: TranslatorSettingsState,
   currentState: TranslatorSettingsState,
 ): TranslatorSettingsState {
-  const existingSecrets = new Map(
-    currentState.profiles.map((profile) => [profile.id, profile.apiKey.trim()]),
+  const existingProfiles = new Map(
+    sanitizeTranslatorSettingsState(currentState).profiles.map((profile) => [profile.id, profile]),
   );
   const imported = sanitizeTranslatorSettingsState(importedState);
 
   return {
     activeProfileId: imported.activeProfileId,
-    profiles: imported.profiles.map((profile) => ({
-      ...profile,
-      apiKey: existingSecrets.get(profile.id) ?? "",
-    })),
+    profiles: imported.profiles.map((profile) => {
+      const existing = existingProfiles.get(profile.id);
+      // A matching ID is insufficient: an imported endpoint must never inherit
+      // credentials intended for another provider or destination.
+      const sameDestination = existing?.llmProvider === profile.llmProvider
+        && normalizeBaseUrl(existing.providerBaseUrl) === normalizeBaseUrl(profile.providerBaseUrl);
+      return { ...profile, apiKey: sameDestination ? existing.apiKey.trim() : "" };
+    }),
   };
 }

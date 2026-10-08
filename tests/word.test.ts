@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   countEnglishWords,
+  createEnglishTokenMatcher,
   extractWordAtOffset,
   getHyphenatedCompoundComponents,
   isEnglishSelectionText,
@@ -156,5 +157,18 @@ describe("selection helpers", () => {
     expect(countEnglishWords("in   charge   of")).toBe(3);
     expect(countEnglishWords("mixed-precision")).toBe(1);
     expect(countEnglishWords("don’t stop")).toBe(2);
+  });
+});
+
+describe("Unicode word boundaries", () => {
+  test.each(["café", "naïve", "cafe\u0301", "中work文", "работа", "café-work"])('never extracts an ASCII fragment of %s', (text) => {
+    expect(text.match(createEnglishTokenMatcher())).toBeNull();
+    expect(extractWordAtOffset(text, 1)).toBeNull();
+    expect(normalizeSingleEnglishWord(text)).toBe("");
+    expect(validateEnglishSelectionText(text)).not.toBe("ok");
+  });
+  test("keeps whole English contractions and compounds in mixed content", () => {
+    expect("café naïve cafe\u0301 don't mixed-precision".match(createEnglishTokenMatcher()))
+      .toEqual(["don't", "mixed-precision"]);
   });
 });

@@ -19,13 +19,13 @@ export type EnglishSelectionValidation =
   | "technical";
 
 export function createEnglishTokenMatcher(): RegExp {
-  return new RegExp(ENGLISH_TOKEN_SOURCE, "g");
+  return new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_'’-])${ENGLISH_TOKEN_SOURCE}(?![\\p{L}\\p{M}\\p{N}_'’-])`, "gu");
 }
 
 export function normalizeSingleEnglishWord(surface: string): string {
   const compact = surface
     .trim()
-    .replace(/^[^A-Za-z'’-]+|[^A-Za-z'’-]+$/g, "")
+    .replace(/^[^\p{L}\p{M}'’-]+|[^\p{L}\p{M}'’-]+$/gu, "")
     .replace(/’/g, "'");
   return ENGLISH_WORD_RE.test(compact) ? compact : "";
 }
@@ -158,7 +158,7 @@ export function validateEnglishSelectionText(text: string): EnglishSelectionVali
   if (isLikelyHandleOrTagOnlySelection(compact)) {
     return "technical";
   }
-  if (!new RegExp(ENGLISH_TOKEN_SOURCE).test(compact)) {
+  if (!createEnglishTokenMatcher().test(compact)) {
     return "notEnglish";
   }
   if (isLikelyTechnicalToken(compact)) {
