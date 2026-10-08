@@ -4,12 +4,11 @@ import { lookupRank, resolveMasteryKey } from "./lexicon";
 import type {
   HighlightIntensity,
   LearnerLevelBand,
-  LearningProgressEntry,
   UserSettings,
   WordFlags,
 } from "./types";
 
-export const CURRENT_USER_SETTINGS_SCHEMA_VERSION = 2;
+export const CURRENT_USER_SETTINGS_SCHEMA_VERSION = 3;
 
 export const DEFAULT_SETTINGS: UserSettings = {
   schemaVersion: CURRENT_USER_SETTINGS_SCHEMA_VERSION,
@@ -18,11 +17,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   unmasteredOverrides: [],
   ignoredWords: [],
   wordReviewTrigger: "doubleClick",
-  learningProgress: {},
 };
-
-const EXPOSURE_WRITE_THROTTLE_MS = 6 * 60 * 60 * 1000;
-const MAX_REVIEW_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface MembershipIndex {
   mastered: Set<string>;
@@ -107,51 +102,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  return Math.min(1, Math.max(0, value));
-}
-
-function sanitizeLearningProgress(
-  input: UserSettings["learningProgress"] | undefined,
-): Record<string, LearningProgressEntry> {
-  if (!input || typeof input !== "object") {
-    return {};
-  }
-
-  const output: Record<string, LearningProgressEntry> = {};
-  for (const [rawKey, rawEntry] of Object.entries(input)) {
-    const key = resolveMasteryKey(rawKey);
-    if (!key || !rawEntry || typeof rawEntry !== "object") {
-      continue;
-    }
-
-    const status = rawEntry.status === "known" || rawEntry.status === "ignored"
-      ? rawEntry.status
-      : "learning";
-    const exposures = Number.isFinite(rawEntry.exposures)
-      ? Math.max(0, Math.round(rawEntry.exposures))
-      : 0;
-    const successes = Number.isFinite(rawEntry.successes)
-      ? Math.max(0, Math.round(rawEntry.successes))
-      : 0;
-    const lastSeenAt = Number.isFinite(rawEntry.lastSeenAt) ? rawEntry.lastSeenAt : undefined;
-    const nextReviewAt = Number.isFinite(rawEntry.nextReviewAt) ? rawEntry.nextReviewAt : undefined;
-
-    output[key] = {
-      status,
-      familiarity: clamp01(rawEntry.familiarity),
-      exposures,
-      successes,
-      ...(lastSeenAt ? { lastSeenAt } : {}),
-      ...(nextReviewAt ? { nextReviewAt } : {}),
-    };
-  }
-  return output;
-}
-
 export function looksLikeSpecialTerm(surface: string, lemma: string, rank: number | null): boolean {
   if (!surface || !lemma || rank !== null) {
     return false;
@@ -233,31 +183,6 @@ export function sanitizeSettings(input?: Partial<UserSettings> | null): UserSett
   const unmasteredOverrides = uniqueNormalizedWords(input?.unmasteredOverrides ?? []).filter(
     (word) => !ignoredSet.has(word),
   );
-  const learningProgress = sanitizeLearningProgress(input?.learningProgress);
-
-  // Backfill progress for data created before the familiarity model existed.
-  for (const word of masteredOverrides) {
-    learningProgress[word] ??= {
-      status: "known",
-      familiarity: 1,
-      exposures: 0,
-      successes: 1,
-    };
-  }
-  for (const word of unmasteredOverrides) {
-    learningProgress[word] ??= {
-      status: "learning",
-      familiarity: 0.25,
-      exposures: 0,
-      successes: 0,
-    };
-  }
-  for (const word of ignoredWords) {
-    learningProgress[word] = {
-      ...(learningProgress[word] ?? { familiarity: 0, exposures: 0, successes: 0 }),
-      status: "ignored",
-    };
-  }
 
   return {
     schemaVersion: CURRENT_USER_SETTINGS_SCHEMA_VERSION,
@@ -266,7 +191,6 @@ export function sanitizeSettings(input?: Partial<UserSettings> | null): UserSett
     unmasteredOverrides,
     ignoredWords,
     wordReviewTrigger,
-    learningProgress,
   };
 }
 
@@ -309,72 +233,21 @@ export function resolveWordFlags(
 }
 
 export function getHighlightIntensity(
-  settings: UserSettings,
-  surface: string,
+  _settings: UserSettings,
+  _surface: string,
   articleOccurrences = 1,
 ): HighlightIntensity {
-  const key = resolveMasteryKey(surface);
-  const progress = key ? settings.learningProgress[key] : undefined;
-
-  if (progress?.status === "learning") {
-    const due = (progress.nextReviewAt ?? 0) <= Date.now();
-    if (due || progress.exposures <= 1) {
-      return "strong";
-    }
-
-    if (progress.exposures >= 6 && progress.familiarity >= 0.75) {
-      return articleOccurrences >= 3 ? "weak" : "none";
-    }
-    if (progress.exposures >= 4 || progress.familiarity >= 0.55) {
-      return articleOccurrences >= 3 ? "normal" : "weak";
-    }
-    return articleOccurrences >= 3 ? "strong" : "normal";
-  }
-
   return articleOccurrences >= 3 ? "strong" : "normal";
 }
 
+// Kept temporarily as a compatibility shim for the translation call path.
+// Translation/help requests no longer mutate learning state.
 export function recordLearningExposure(
   settings: UserSettings,
-  surface: string,
-  now = Date.now(),
+  _surface: string,
+  _now = Date.now(),
 ): UserSettings {
-  const key = resolveMasteryKey(surface);
-  if (!key || !getMembershipIndex(settings).unmastered.has(key)) {
-    return settings;
-  }
-
-  const current = settings.learningProgress[key] ?? {
-    status: "learning" as const,
-    familiarity: 0.25,
-    exposures: 0,
-    successes: 0,
-  };
-  if (current.lastSeenAt && now - current.lastSeenAt < EXPOSURE_WRITE_THROTTLE_MS) {
-    return settings;
-  }
-
-  const exposures = current.exposures + 1;
-  const familiarity = Math.min(0.8, current.familiarity + 0.1);
-  const interval = Math.min(
-    MAX_REVIEW_INTERVAL_MS,
-    12 * 60 * 60 * 1000 * 2 ** Math.min(exposures - 1, 4),
-  );
-
-  return sanitizeSettings({
-    ...settings,
-    learningProgress: {
-      ...settings.learningProgress,
-      [key]: {
-        ...current,
-        status: "learning",
-        familiarity,
-        exposures,
-        lastSeenAt: now,
-        nextReviewAt: now + interval,
-      },
-    },
-  });
+  return settings;
 }
 
 export function setWordMastered(settings: UserSettings, lemma: string): UserSettings {
@@ -382,23 +255,12 @@ export function setWordMastered(settings: UserSettings, lemma: string): UserSett
   if (!normalized) {
     return settings;
   }
-  const previous = settings.learningProgress[normalized];
 
   return sanitizeSettings({
     ...settings,
     masteredOverrides: [...settings.masteredOverrides, normalized],
     unmasteredOverrides: settings.unmasteredOverrides.filter((word) => word !== normalized),
     ignoredWords: settings.ignoredWords.filter((word) => word !== normalized),
-    learningProgress: {
-      ...settings.learningProgress,
-      [normalized]: {
-        status: "known",
-        familiarity: 1,
-        exposures: previous?.exposures ?? 0,
-        successes: (previous?.successes ?? 0) + 1,
-        lastSeenAt: Date.now(),
-      },
-    },
   });
 }
 
@@ -411,25 +273,12 @@ export function setWordUnmastered(
   if (!normalized) {
     return settings;
   }
-  const previous = settings.learningProgress[normalized];
-  const now = Date.now();
 
   return sanitizeSettings({
     ...settings,
     masteredOverrides: settings.masteredOverrides.filter((word) => word !== normalized),
     unmasteredOverrides: [...settings.unmasteredOverrides, normalized],
     ignoredWords: settings.ignoredWords.filter((word) => word !== normalized),
-    learningProgress: {
-      ...settings.learningProgress,
-      [normalized]: {
-        status: "learning",
-        familiarity: Math.min(previous?.familiarity ?? 0.25, 0.35),
-        exposures: 0,
-        successes: previous?.successes ?? 0,
-        lastSeenAt: now,
-        nextReviewAt: now,
-      },
-    },
   });
 }
 
@@ -438,23 +287,12 @@ export function setWordIgnored(settings: UserSettings, lemma: string): UserSetti
   if (!normalized) {
     return settings;
   }
-  const previous = settings.learningProgress[normalized];
 
   return sanitizeSettings({
     ...settings,
     masteredOverrides: settings.masteredOverrides.filter((word) => word !== normalized),
     unmasteredOverrides: settings.unmasteredOverrides.filter((word) => word !== normalized),
     ignoredWords: [...settings.ignoredWords, normalized],
-    learningProgress: {
-      ...settings.learningProgress,
-      [normalized]: {
-        status: "ignored",
-        familiarity: previous?.familiarity ?? 0,
-        exposures: previous?.exposures ?? 0,
-        successes: previous?.successes ?? 0,
-        ...(previous?.lastSeenAt ? { lastSeenAt: previous.lastSeenAt } : {}),
-      },
-    },
   });
 }
 
@@ -463,13 +301,10 @@ export function removeWordIgnored(settings: UserSettings, lemma: string): UserSe
   if (!normalized) {
     return settings;
   }
-  const learningProgress = { ...settings.learningProgress };
-  delete learningProgress[normalized];
 
   return sanitizeSettings({
     ...settings,
     ignoredWords: settings.ignoredWords.filter((word) => word !== normalized),
-    learningProgress,
   });
 }
 
@@ -491,7 +326,6 @@ export function clearLearningProgress(settings: UserSettings): UserSettings {
     unmasteredOverrides: [],
     ignoredWords: [],
     wordReviewTrigger: settings.wordReviewTrigger,
-    learningProgress: {},
   });
 }
 

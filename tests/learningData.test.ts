@@ -50,11 +50,21 @@ describe("learning data export", () => {
       exportVersion: LEARNING_DATA_EXPORT_VERSION,
       exportedAt: "2026-09-08T12:00:00.000Z",
       userSettings: {
+        schemaVersion: 2,
         knownBaseRank: 4321,
         masteredOverrides: ["Worked"],
         unmasteredOverrides: [],
         ignoredWords: [],
         wordReviewTrigger: "doubleClick",
+        learningProgress: {
+          work: {
+            status: "known",
+            familiarity: 1,
+            exposures: 12,
+            successes: 2,
+            nextReviewAt: 1_800_000_000_000,
+          },
+        },
       },
       translatorSettingsState: {
         activeProfileId: DEFAULT_TRANSLATOR_PROFILE.id,
@@ -69,7 +79,7 @@ describe("learning data export", () => {
 
     expect(bundle.userSettings.schemaVersion).toBe(CURRENT_USER_SETTINGS_SCHEMA_VERSION);
     expect(bundle.userSettings.masteredOverrides).toContain("work");
-    expect(bundle.userSettings.learningProgress.work?.status).toBe("known");
+    expect("learningProgress" in bundle.userSettings).toBe(false);
     expect(bundle.translatorSettingsState.profiles[0]?.apiKey).toBe("");
   });
 

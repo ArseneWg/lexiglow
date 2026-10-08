@@ -17,40 +17,35 @@ describe("user settings schema", () => {
 
     expect(migrated.schemaVersion).toBe(CURRENT_USER_SETTINGS_SCHEMA_VERSION);
     expect(migrated.masteredOverrides).toContain("work");
-    expect(migrated.learningProgress.work?.status).toBe("known");
-    expect(migrated.learningProgress.go?.status).toBe("learning");
+    expect(migrated.unmasteredOverrides).toContain("go");
   });
 
-  test("repairs partially corrupted fields instead of propagating invalid state", () => {
-    const migrated = sanitizeSettings({
-      schemaVersion: 1,
+  test("drops legacy familiarity and review-scheduling data", () => {
+    const legacy = {
+      schemaVersion: 2,
       knownBaseRank: Number.NaN,
       masteredOverrides: ["news", "news"],
       unmasteredOverrides: ["morning"],
       ignoredWords: [],
-      wordReviewTrigger: "selection",
+      wordReviewTrigger: "selection" as const,
       learningProgress: {
         news: {
           status: "known",
-          familiarity: 99,
-          exposures: -4,
-          successes: -1,
-          lastSeenAt: Number.NaN,
+          familiarity: 1,
+          exposures: 42,
+          successes: 9,
+          nextReviewAt: Date.now() + 86_400_000,
         },
       },
-    });
+    };
+
+    const migrated = sanitizeSettings(legacy);
 
     expect(migrated.schemaVersion).toBe(CURRENT_USER_SETTINGS_SCHEMA_VERSION);
     expect(Number.isFinite(migrated.knownBaseRank)).toBe(true);
     expect(migrated.masteredOverrides).toEqual(["news"]);
     expect(migrated.unmasteredOverrides).toEqual(["morning"]);
-    expect(migrated.learningProgress.news).toEqual(expect.objectContaining({
-      status: "known",
-      familiarity: 1,
-      exposures: 0,
-      successes: 0,
-    }));
-    expect(migrated.learningProgress.news?.lastSeenAt).toBeUndefined();
+    expect("learningProgress" in migrated).toBe(false);
   });
 
   test("migration is idempotent", () => {

@@ -1,12 +1,3 @@
-export interface LearningProgressEntry {
-  status: "learning" | "known" | "ignored";
-  familiarity: number;
-  exposures: number;
-  successes: number;
-  lastSeenAt?: number;
-  nextReviewAt?: number;
-}
-
 export interface UserSettings {
   schemaVersion: number;
   knownBaseRank: number;
@@ -14,7 +5,6 @@ export interface UserSettings {
   unmasteredOverrides: string[];
   ignoredWords: string[];
   wordReviewTrigger: "doubleClick" | "selection";
-  learningProgress: Record<string, LearningProgressEntry>;
 }
 
 export type SupportedLearnerLanguageCode =

@@ -5,95 +5,49 @@ import {
   getHighlightIntensity,
   recordLearningExposure,
   resolveWordFlags,
-  sanitizeSettings,
   setWordMastered,
   setWordUnmastered,
 } from "../src/shared/settings";
 
-describe("familiarity-aware learning progress", () => {
-  test("backfills progress for legacy override data", () => {
-    const settings = sanitizeSettings({
-      knownBaseRank: 2500,
-      masteredOverrides: ["translate"],
-      unmasteredOverrides: ["work"],
-      ignoredWords: [],
-      wordReviewTrigger: "doubleClick",
-    });
+describe("simple learning state", () => {
+  test("relearning turns a previously known word back into an explicit unknown word", () => {
+    const mastered = setWordMastered(DEFAULT_SETTINGS, "worked");
+    const relearning = setWordUnmastered(mastered, "worked", 2000);
 
-    expect(settings.learningProgress.translate).toEqual(
-      expect.objectContaining({ status: "known", familiarity: 1 }),
-    );
-    expect(settings.learningProgress.work).toEqual(
-      expect.objectContaining({ status: "learning", familiarity: 0.25 }),
-    );
+    expect(relearning.masteredOverrides).not.toContain("work");
+    expect(relearning.unmasteredOverrides).toContain("work");
+    expect(resolveWordFlags("work", 100, relearning, "worked").shouldTranslate).toBe(true);
   });
 
-  test("relearning creates a due learning state", () => {
-    const settings = setWordUnmastered(DEFAULT_SETTINGS, "worked", 2000);
-    const progress = settings.learningProgress.work;
+  test("translation requests do not mutate long-term learning state", () => {
+    const unknown = setWordUnmastered(DEFAULT_SETTINGS, "work", 100);
+    let settings = unknown;
 
+    for (let index = 1; index <= 20; index += 1) {
+      settings = recordLearningExposure(settings, "worked", 1_800_000_000_000 + index * 24 * 60 * 60 * 1000);
+    }
+
+    expect(settings).toBe(unknown);
     expect(settings.unmasteredOverrides).toContain("work");
-    expect(progress.status).toBe("learning");
-    expect(progress.exposures).toBe(0);
-    expect(progress.nextReviewAt).toBeDefined();
     expect(resolveWordFlags("work", 100, settings, "worked").shouldTranslate).toBe(true);
+    expect(getHighlightIntensity(settings, "worked", 1)).toBe("normal");
   });
 
-  test("spaced exposures raise familiarity without silently mastering the word", () => {
-    const baseNow = 1_800_000_000_000;
-    let settings = setWordUnmastered(DEFAULT_SETTINGS, "work", 100);
-
-    for (let index = 1; index <= 5; index += 1) {
-      settings = recordLearningExposure(settings, "worked", baseNow + index * 7 * 60 * 60 * 1000);
-    }
-
-    const progress = settings.learningProgress.work;
-    expect(progress.exposures).toBe(5);
-    expect(progress.familiarity).toBeGreaterThan(0.6);
-    expect(settings.unmasteredOverrides).toContain("work");
-    expect(getHighlightIntensity(settings, "worked", 1)).toBe("weak");
-  });
-
-  test("well-exposed relearning words rest between review intervals and return when due", () => {
-    const baseNow = 1_800_000_000_000;
-    let settings = setWordUnmastered(DEFAULT_SETTINGS, "work", 100);
-
-    for (let index = 1; index <= 6; index += 1) {
-      settings = recordLearningExposure(settings, "worked", baseNow + index * 7 * 60 * 60 * 1000);
-    }
-
-    expect(settings.learningProgress.work.exposures).toBe(6);
-    expect(settings.learningProgress.work.familiarity).toBeGreaterThanOrEqual(0.75);
-    expect(getHighlightIntensity(settings, "worked", 1)).toBe("none");
-    expect(getHighlightIntensity(settings, "worked", 3)).toBe("weak");
-
-    const dueSettings = sanitizeSettings({
-      ...settings,
-      learningProgress: {
-        ...settings.learningProgress,
-        work: {
-          ...settings.learningProgress.work,
-          nextReviewAt: Date.now() - 1,
-        },
-      },
-    });
-
-    expect(getHighlightIntensity(dueSettings, "worked", 1)).toBe("strong");
-  });
-
-  test("explicit mastery remains the authoritative completion action", () => {
-    const relearning = setWordUnmastered(DEFAULT_SETTINGS, "work", 100);
-    const mastered = setWordMastered(relearning, "worked");
+  test("explicit mastery is the only action that completes learning", () => {
+    const unknown = setWordUnmastered(DEFAULT_SETTINGS, "work", 100);
+    const mastered = setWordMastered(unknown, "worked");
 
     expect(mastered.masteredOverrides).toContain("work");
     expect(mastered.unmasteredOverrides).not.toContain("work");
-    expect(mastered.learningProgress.work).toEqual(
-      expect.objectContaining({ status: "known", familiarity: 1 }),
-    );
+    expect(resolveWordFlags("work", 100, mastered, "worked").isKnown).toBe(true);
   });
 
-  test("article repetition promotes otherwise-normal unknown words", () => {
-    expect(getHighlightIntensity(DEFAULT_SETTINGS, "obfuscation", 1)).toBe("normal");
-    expect(getHighlightIntensity(DEFAULT_SETTINGS, "obfuscation", 3)).toBe("strong");
+  test("article repetition only changes current-page highlight priority", () => {
+    const unknown = setWordUnmastered(DEFAULT_SETTINGS, "obfuscation", null);
+
+    expect(getHighlightIntensity(unknown, "obfuscation", 1)).toBe("normal");
+    expect(getHighlightIntensity(unknown, "obfuscation", 2)).toBe("normal");
+    expect(getHighlightIntensity(unknown, "obfuscation", 3)).toBe("strong");
+    expect(unknown.unmasteredOverrides).toContain("obfuscation");
   });
 });
