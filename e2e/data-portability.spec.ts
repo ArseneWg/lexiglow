@@ -101,6 +101,7 @@ test("Options exports a secret-free backup and restores learning data without lo
     },
   };
 
+  options.once("dialog", (dialog) => dialog.accept());
   await options.locator("#importDataInput").setInputFiles({
     name: "lexiglow-learning-data.json",
     mimeType: "application/json",

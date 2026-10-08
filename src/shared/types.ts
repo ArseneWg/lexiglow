@@ -69,6 +69,7 @@ export interface AlternativeMeaning {
 }
 
 export interface TranslationResult {
+  translationNotice?: string;
   translation: string;
   sentenceTranslation?: string;
   englishExplanation?: string;
@@ -82,6 +83,7 @@ export interface TranslationResult {
 }
 
 export interface SelectionTranslationResult {
+  translationNotice?: string;
   text: string;
   translation: string;
   sentenceTranslation?: string;
@@ -189,6 +191,7 @@ export interface SentenceAnalysisCacheEntry {
 }
 
 export interface LexiconLookupResult {
+  translationNotice?: string;
   lemma: string;
   lexicalLemma?: string;
   surface: string;

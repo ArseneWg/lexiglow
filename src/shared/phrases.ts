@@ -119,11 +119,11 @@ export function normalizePhraseKey(value: string): string {
 }
 
 function isBoundaryCharacter(value: string | undefined): boolean {
-  return !value || !/[A-Za-z0-9']/u.test(value);
+  return !value || !/[\p{L}\p{M}\p{N}_'’-]/u.test(value);
 }
 
 export function findLearningPhraseMatches(text: string): PhraseMatch[] {
-  const normalized = text.toLowerCase().replace(/[’]/g, "'");
+  const normalized = text.replace(/[A-Z]/g, (char) => char.toLowerCase()).replace(/[’]/g, "'");
   const matches: PhraseMatch[] = [];
   const occupied: Array<{ start: number; end: number }> = [];
 

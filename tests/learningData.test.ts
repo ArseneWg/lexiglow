@@ -128,3 +128,20 @@ describe("learning data export", () => {
     expect(merged.profiles.some((profile) => profile.apiKey === "do-not-transfer")).toBe(false);
   });
 });
+
+describe("import credential destination binding", () => {
+  const current = { activeProfileId: "local", profiles: [{ ...DEFAULT_TRANSLATOR_PROFILE,
+    id: "local", llmProvider: "openai-compatible" as const, providerBaseUrl: "https://trusted.test/v1", apiKey: "synthetic-secret" }] };
+  test.each(["https://other.test/v1", "http://trusted.test/v1", "https://trusted.test/v2"])("drops the key for changed endpoint %s", (url) => {
+    const imported = { ...current, profiles: [{ ...current.profiles[0]!, providerBaseUrl: url }] };
+    expect(mergeImportedTranslatorSecrets(imported, current).profiles[0]?.apiKey).toBe("");
+  });
+  test("drops the key when the provider changes", () => {
+    const imported = { ...current, profiles: [{ ...current.profiles[0]!, llmProvider: "gemini" as const }] };
+    expect(mergeImportedTranslatorSecrets(imported, current).profiles[0]?.apiKey).toBe("");
+  });
+  test("retains it for an equivalent normalized endpoint and changed model/name", () => {
+    const imported = { ...current, profiles: [{ ...current.profiles[0]!, providerBaseUrl: " https://trusted.test/v1/ ", name: "Rename", providerModel: "another-model" }] };
+    expect(mergeImportedTranslatorSecrets(imported, current).profiles[0]?.apiKey).toBe("synthetic-secret");
+  });
+});

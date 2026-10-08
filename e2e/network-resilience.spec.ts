@@ -54,6 +54,7 @@ for (const failure of [
     await page.locator("#target").hover();
 
     await expect(page.locator(".wordwise-primary-translation")).toContainText("回退成功");
+    await expect(page.locator(".wordwise-feedback").filter({ hasText: "已改用 Google" })).toBeVisible();
     expect(llmCalls).toBe(1);
     expect(googleCalls).toBe(1);
   });

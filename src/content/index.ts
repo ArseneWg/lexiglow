@@ -69,6 +69,8 @@ function getAlternateTranslationProvider(provider: TranslationProviderChoice): T
 }
 
 const TOOLTIP_STYLE = `
+  .wordwise-feedback { margin-top: 8px; color: #7c4a13; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+  .wordwise-feedback[hidden] { display: none; }
   :host {
     all: initial;
   }
@@ -2230,6 +2232,15 @@ function createTooltipRoot() {
   hintEl.dataset.kind = "prompt";
   hintEl.textContent = ui("tooltipSwitchToContextualTranslation");
 
+  const translationNoticeEl = document.createElement("div");
+  translationNoticeEl.className = "wordwise-feedback";
+  translationNoticeEl.setAttribute("role", "status");
+  translationNoticeEl.hidden = true;
+  const pronunciationHelpEl = document.createElement("div");
+  pronunciationHelpEl.className = "wordwise-feedback";
+  pronunciationHelpEl.setAttribute("role", "status");
+  pronunciationHelpEl.hidden = true;
+
   const actionsEl = document.createElement("div");
   actionsEl.className = "wordwise-actions";
   const actionIndicatorEl = document.createElement("div");
@@ -2470,7 +2481,7 @@ function createTooltipRoot() {
   );
   actionsEl.append(actionIndicatorEl, llmButton, selectionAnalysisButton, reviewButton, ignoreButton, button);
   metaEl.append(hintEl, metaDividerEl, rankEl);
-  wordView.append(surfaceHeaderEl, pronunciationEl, translationEl, actionsEl);
+  wordView.append(surfaceHeaderEl, pronunciationEl, pronunciationHelpEl, translationEl, actionsEl, translationNoticeEl);
   analysisHeader.append(analysisTitleEl, analysisTriggerButton);
   analysisView.append(
     analysisHeader,
@@ -2495,6 +2506,8 @@ function createTooltipRoot() {
     surfaceEl,
     surfacePosEl,
     pronunciationEl,
+    pronunciationHelpEl,
+    translationNoticeEl,
     britishLabel,
     britishPhoneticEl,
     americanLabel,
@@ -2886,12 +2899,18 @@ function supportsHighlights(): boolean {
   return typeof Highlight !== "undefined" && "highlights" in CSS;
 }
 
+function isDeclaredNonEnglish(node: Node): boolean {
+  const element = node instanceof Element ? node : node.parentElement;
+  const language = element?.closest("[lang]")?.getAttribute("lang")?.trim().toLowerCase();
+  return Boolean(language && language !== "und" && language !== "en" && !language.startsWith("en-"));
+}
+
 function shouldSkipTextNode(node: Text): boolean {
   if (!node.textContent?.trim()) {
     return true;
   }
 
-  return isIgnoredContainer(node);
+  return isIgnoredContainer(node) || isDeclaredNonEnglish(node);
 }
 
 function isVisibleRect(rect: DOMRect): boolean {
@@ -2909,6 +2928,9 @@ const tooltip = createTooltipRoot();
 installHighlightStyle();
 
 function applyTooltipLocale() {
+  tooltip.card.lang = currentLearnerLanguageCode;
+  tooltip.card.dir = currentLearnerLanguageCode === "ar" ? "rtl" : "ltr";
+  for (const element of [tooltip.surfaceEl, tooltip.pronunciationEl, tooltip.englishExplanationEl, tooltip.analysisSourceEl]) element.dir = "ltr";
   tooltip.closeButton.setAttribute("aria-label", ui("tooltipClose"));
   tooltip.britishLabel.textContent = ui("tooltipUk");
   tooltip.britishButton.setAttribute("aria-label", ui("tooltipPlayUkPronunciation"));
@@ -2970,6 +2992,7 @@ let activeSentenceAnalysisRequestId = 0;
 let suppressSelectionTriggerUntil = 0;
 let pointerSelecting = false;
 let activePronunciationSurface = "";
+let activePronunciationKey = "";
 let activePronunciationRequestId = 0;
 let activePronunciationResult: PronunciationResult | null = null;
 let activePronunciationAudio: HTMLAudioElement | null = null;
@@ -3009,6 +3032,7 @@ function hideTooltip() {
   activeLexicalMetadataRequestId += 1;
   activePronunciationRequestId += 1;
   activePronunciationSurface = "";
+  activePronunciationKey = "";
   activePronunciationResult = null;
   resetLexicalMeaningDisplay();
   tooltipSession = HIDDEN_TOOLTIP_SESSION;
@@ -3392,16 +3416,25 @@ function formatPronunciationDisplayText(value?: string, audioUrl?: string): stri
     return value;
   }
 
-  return audioUrl ? "Audio only" : "No IPA";
+  return audioUrl ? ui("tooltipAudioOnly") : ui("tooltipNoIpa");
 }
 
 function resetPronunciationDisplay(surface: string) {
   activePronunciationSurface = surface;
   activePronunciationResult = null;
+  tooltip.pronunciationHelpEl.hidden = true;
   tooltip.britishButton.disabled = true;
   tooltip.americanButton.disabled = true;
   tooltip.britishPhoneticEl.textContent = "/.../";
   tooltip.americanPhoneticEl.textContent = "/.../";
+}
+
+function ensurePronunciation(surface: string, contextText?: string, partOfSpeech?: string) {
+  const key = JSON.stringify([surface, contextText ?? "", partOfSpeech ?? ""]);
+  if (key === activePronunciationKey) return;
+  activePronunciationKey = key;
+  resetPronunciationDisplay(surface);
+  void loadPronunciation(surface, contextText, partOfSpeech);
 }
 
 async function loadPronunciation(surface: string, contextText?: string, partOfSpeech?: string) {
@@ -3447,8 +3480,10 @@ async function loadPronunciation(surface: string, contextText?: string, partOfSp
   if (response.result?.confidence === "ambiguous") {
     tooltip.britishButton.disabled = true;
     tooltip.americanButton.disabled = true;
-    tooltip.britishPhoneticEl.textContent = "Multiple pronunciations";
-    tooltip.americanPhoneticEl.textContent = "Multiple pronunciations";
+    tooltip.britishPhoneticEl.textContent = ui("tooltipAmbiguousPronunciation");
+    tooltip.americanPhoneticEl.textContent = ui("tooltipAmbiguousPronunciation");
+    tooltip.pronunciationHelpEl.textContent = ui("tooltipAmbiguousPronunciationHelp");
+    tooltip.pronunciationHelpEl.hidden = false;
     return;
   }
   tooltip.britishButton.disabled = false;
@@ -3469,6 +3504,7 @@ function renderSelectionTooltip(
     translation?: string;
     sentenceTranslation?: string;
     translationProvider?: string;
+    translationNotice?: string;
     contextualPartOfSpeech?: string;
     lemma?: string;
     lexicalLemma?: string;
@@ -3485,6 +3521,8 @@ function renderSelectionTooltip(
   tooltip.analysisView.dataset.visible = "false";
   setWordTooltipControls("selection", context.text);
   applySelectionTypography(context);
+  tooltip.translationNoticeEl.textContent = result?.translationNotice ?? "";
+  tooltip.translationNoticeEl.hidden = !result?.translationNotice;
   tooltip.surfaceEl.textContent = "";
   tooltip.surfacePosEl.textContent = "";
   tooltip.surfacePosEl.dataset.visible = "false";
@@ -3528,13 +3566,12 @@ function renderSelectionTooltip(
   activeResult = null;
   if (isSingleEnglishWord(context.text)) {
     const surface = normalizeSingleEnglishWord(context.text) || context.text;
-    if (activePronunciationSurface !== surface) {
-      resetPronunciationDisplay(surface);
-      void loadPronunciation(surface, context.contextText);
-    }
+    ensurePronunciation(surface, context.contextText);
   } else {
     activePronunciationRequestId += 1;
     activePronunciationSurface = "";
+    activePronunciationKey = "";
+    tooltip.pronunciationHelpEl.hidden = true;
     activePronunciationResult = null;
   }
   positionTooltip(context.rect);
@@ -3619,6 +3656,8 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltip.analysisView.dataset.visible = "false";
   setWordTooltipControls("word");
   applySelectionTypography(null);
+  tooltip.translationNoticeEl.textContent = result.translationNotice ?? "";
+  tooltip.translationNoticeEl.hidden = !result.translationNotice;
   tooltip.surfaceEl.textContent = result.surface;
   tooltip.surfacePosEl.textContent = result.partOfSpeech ?? "";
   tooltip.surfacePosEl.dataset.visible = result.partOfSpeech ? "true" : "false";
@@ -3658,14 +3697,7 @@ function renderTooltip(result: LexiconLookupResult, rect: DOMRect) {
   tooltipSession = createTooltipSession(activeContext?.forceTranslate ? "reviewWord" : "hoverWord");
   positionTooltip(rect);
   activeResult = result;
-  if (activePronunciationSurface !== result.surface) {
-    resetPronunciationDisplay(result.surface);
-    void loadPronunciation(
-      result.surface,
-      activeContext?.contextText,
-      result.contextualPartOfSpeech ?? result.partOfSpeech,
-    );
-  }
+  ensurePronunciation(result.surface, activeContext?.contextText, result.contextualPartOfSpeech ?? result.partOfSpeech);
 }
 
 function renderSentenceAnalysisPanel(
@@ -3915,6 +3947,7 @@ async function requestSelectionTranslation(
     translation?: string;
     sentenceTranslation?: string;
     translationProvider?: string;
+    translationNotice?: string;
     contextualPartOfSpeech?: string;
     lemma?: string;
     lexicalLemma?: string;
@@ -3935,6 +3968,7 @@ async function requestSelectionTranslation(
           translation: response.result.translation,
           sentenceTranslation: response.result.sentenceTranslation,
           translationProvider: response.result.translationProvider,
+          translationNotice: response.result.translationNotice,
           contextualPartOfSpeech: response.result.contextualPartOfSpeech,
           lemma: response.result.lemma,
           lexicalLemma: response.result.lexicalLemma,
@@ -3953,6 +3987,7 @@ async function requestSelectionTranslation(
           translation: response.result.translation,
           sentenceTranslation: response.result.sentenceTranslation,
           translationProvider: response.result.translationProvider,
+          translationNotice: response.result.translationNotice,
         };
       }
     }
@@ -4219,7 +4254,7 @@ function isSameHoverTarget(context: HoverContext): boolean {
 
 function getHoverContext(clientX: number, clientY: number): HoverContext | null {
   const caret = getCaretRangeFromPoint(clientX, clientY);
-  if (!caret || isIgnoredContainer(caret.node)) return null;
+  if (!caret || isIgnoredContainer(caret.node) || isDeclaredNonEnglish(caret.node)) return null;
 
   const text = caret.node.textContent ?? "";
   const target = findLearningPhraseAtOffset(text, caret.offset) ?? extractWordAtOffset(text, caret.offset);
@@ -4693,7 +4728,8 @@ globalThis.chrome?.storage?.onChanged?.addListener?.((changes, areaName) => {
 });
 
 const mutationObserver = new MutationObserver((records) => {
-  highlightEngine?.handleMutations(records);
+  if (records.some((record) => record.type === "attributes")) scheduleHighlightRefresh();
+  else highlightEngine?.handleMutations(records);
 });
 
 function startObservers() {
@@ -4701,6 +4737,8 @@ function startObservers() {
     mutationObserver.observe(document.body, {
       childList: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: ["lang"],
       subtree: true,
     });
   }
